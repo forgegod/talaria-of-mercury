@@ -1,0 +1,35 @@
+# Byte-compiled / optimised files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test / coverage caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Tooling caches / virtualenvs
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Local environment overrides
+.env
+.env.local
