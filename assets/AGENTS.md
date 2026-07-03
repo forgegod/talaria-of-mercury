@@ -14,9 +14,6 @@ logo and its derived sizes.
   `logo-mark.svg` (square, no wordmark), `logo-inverse.svg` (white fill
   for dark backgrounds).
 - `build_logo.py` regenerates the SVGs from the ASCII source.
-- `build_logo_grid.py` is the legacy standalone grid-glyph renderer; it
-  has been superseded by `build_logo.py` and can be deleted on the next
-  clean-up pass.
 
 ## Local Contracts
 
@@ -53,4 +50,3 @@ logo and its derived sizes.
 - `logo-mark.svg`, `logo-mark-128.png`, `logo-mark-256.png` — square mark only.
 - `logo-inverse.svg` — white-on-transparent for dark backgrounds.
 - `build_logo.py` — SVG source generator (single source of truth).
-- `build_logo_grid.py` — legacy grid-glyph renderer (superseded).
