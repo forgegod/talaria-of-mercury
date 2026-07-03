@@ -2,16 +2,23 @@
 
 ## Purpose
 
-Hermes-specific Talaria features — read-only inspection of the agent's
-`state.db` and `logs/` to verify mitigations, surface regressions, and
-deliver verdicts to operators.
+Hermes-specific Talaria features — inspections of the agent's `state.db`
+and `logs/`, plus narrowly scoped maintenance for Hermes model metadata
+caches.
 
 ## Ownership
 
 - Each feature is a single module exposing `run(paths, **opts) -> dict`
   and `render_human(report) -> tuple[int, str]`.
-- The first feature is `moa_truncation`, ported from
-  `~/.hermes/scripts/check_moa_truncation.py`.
+- `moa_truncation` verifies output-token trends and length-class log markers.
+- `refresh_catalog` is profile-agnostic by design — every Hermes profile
+  reads the same provider cache. `--gateway` selects which provider's
+  catalog is fetched and which provider manifest is written (currently
+  only `kilocode`). Do not add `--profile` filtering, per-profile
+  caches, or any logic that treats this feature as a state.db/logs consumer.
+- `context_cache_fix` is profile-scoped by design — it repairs only the
+  selected profile's `context_length_cache.yaml` using a curated fix table
+  and preserves unrelated cache entries.
 
 ## Local Contracts
 
@@ -24,15 +31,25 @@ deliver verdicts to operators.
   the alert.
 - Reports must include `fired: bool` so JSON consumers can branch on the
   exit signal without parsing human output.
+- `refresh_catalog` reports use `ok: bool` instead of `fired` because
+  there is no alert condition — there is only "refresh succeeded" vs.
+  "tool error". Exit code 2 covers all failure modes
+  (auth/network/parse/write); the `reason` field disambiguates them.
+- `context_cache_fix` reports use `ok: bool` and `changed: bool`.
+  Writes must go through the same atomic backup writer used by sync.
+  `--dry-run` must not write a cache file or backup.
 
 ## Work Guidance
 
-- When porting from the standalone `~/.hermes/scripts/` directory, keep the
-  behaviour identical but reshape into `run()` + `render_human()`. Do not
-  preserve the standalone CLI flag spelling unless it matches Talaria
-  conventions (`--state-db`, `--log-dir`, `--profile`).
+- Feature modules expose `run()` + `render_human()` and use Talaria CLI
+  conventions (`--state-db`, `--log-dir`, `--profile`) for profile-scoped
+  inputs.
 - Feature-specific constants (regexes, thresholds, default windows) live at
   the top of the module.
+- Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`
+  does the fetch + reshape + write path inside the Python CLI.
+- `context_cache_fix.KNOWN_CONTEXT_FIXES` must stay small and source-backed;
+  do not add speculative model windows.
 
 ## Verification
 
@@ -40,8 +57,18 @@ deliver verdicts to operators.
   with `tests._helpers.make_sessions_db`.
 - Log scans are tested with hand-crafted lines in a tmpdir; severity gating
   is the must-test edge case.
+- `refresh_catalog` tests stub `urllib.request.urlopen` and run the full
+  `run()` orchestrator against realistic upstream payloads. No real
+  network is used.
+- `context_cache_fix` tests cover bad existing entries, missing-key
+  insertion, `--only-existing`, dry-run write suppression, and CLI profile
+  resolution.
 
 ## Child DOX Index
 
 - `moa_truncation.py` — Signal A (output_tokens trend) + Signal B (length-class
-  log markers). First feature; canonical shape for future ports.
+  log markers).
+- `refresh_catalog.py` — fetch + reshape the selected gateway catalog into
+  the matching Hermes provider manifest cache. Profile-agnostic.
+- `context_cache_fix.py` — repair curated known-bad entries in a profile's
+  `context_length_cache.yaml` with atomic writes and backups.

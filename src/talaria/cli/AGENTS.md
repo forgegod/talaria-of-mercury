@@ -19,6 +19,10 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 - `cmd_<name>(args)` functions are private dispatcher targets — they are
   registered on subparsers via `set_defaults(func=...)` and never called by
   external code.
+- `talaria sync` is a flat subcommand (no nested subsubparser): it takes
+  `<source>` and optional `<target>`, plus flags that select/configure the
+  five sync phases and the `--add-mcp-serve` injection. Defaults to
+  apply-by-default; `--dry-run` opts out.
 
 ## Work Guidance
 
@@ -29,6 +33,11 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   `talaria.hermos.moa_truncation`).
 - `--json` flag is always present on data-producing subcommands and produces
   a JSON dump via `json.dumps(payload, indent=2, default=str)`.
+- Profile-agnostic features (e.g. `talaria hermes refresh-catalog`) still
+  call `resolve_paths()` for dispatcher shape symmetry, but the resolved
+  profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.
+- Profile-scoped write features (e.g. `talaria hermes fix-context-cache`)
+  must expose `--dry-run`, `--no-backup`, `--json`, and `--show-resolution`.
 
 ## Verification
 

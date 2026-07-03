@@ -80,6 +80,8 @@ When the user requests a durable behavior change, record it here or in the relev
 
 Project-wide durable preferences (style, workflow, conventions) live in user memory; this section is reserved for contract-level rules that bind every child doc.
 
+- Documentation describes current project state only; git carries the timeline and retired designs.
+
 ## Architectural decisions
 
 - **Agent harness protected by tirith.sh.** Reading passwords or access tokens is prohibited. Extract variables from `.env` / config files without relaying their values; use environment variables by importing them for Bash execution. `***` in output is a tirith redaction marker, not a literal value — never "fix" it to a variable ref.

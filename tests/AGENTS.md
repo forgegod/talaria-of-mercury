@@ -7,7 +7,8 @@ Pytest suite for the Talaria CLI and library.
 ## Ownership
 
 - One test module per feature: `test_paths.py` for path resolution,
-  `test_moa_truncation.py` for the first feature.
+  `test_moa_truncation.py`, `test_refresh_catalog.py`,
+  `test_context_cache_fix.py`, and `test_sync.py` for feature coverage.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
   `_helpers.py` (importable, not auto-discovered by pytest).
 
@@ -40,5 +41,12 @@ Pytest suite for the Talaria CLI and library.
 
 - `test_paths.py` — `talaria.paths` resolution precedence.
 - `test_moa_truncation.py` — Signal A, Signal B, renderer, JSON output, CLI.
+- `test_refresh_catalog.py` — reshape, credential discovery, cache
+  freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.
+- `test_context_cache_fix.py` — curated context-length cache repairs,
+  backups, dry-run behaviour, and CLI profile/path resolution.
+- `test_sync.py` — sync phases (config, soul, skills, env,
+  context_cache), dot-path helpers, profile resolution, run_sync
+  orchestration, CLI surface.
 - `_helpers.py` — `make_sessions_db(path, rows)`.
 - `conftest.py` — `fake_hermes_root`, `clean_env` fixtures.

@@ -8,16 +8,20 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 
 - Package code lives in this subtree; tests live in `/tests`.
 - The package's public surface is `talaria.cli:main` (the console script) plus
-  the importable modules `talaria.paths`, `talaria.hermos.*`, and the version
-  constant on `talaria.__version__`.
+  the importable modules `talaria.paths`, `talaria.hermos.*`,
+  `talaria.sync.*`, and the version constant on `talaria.__version__`.
 - Backwards-incompatible changes to the CLI surface require a major version bump.
 
 ## Local Contracts
 
 - Public CLI surface: `talaria [--version] <command> [<subcommand>] [...flags]`.
 - Exit codes: `0` clean, `1` signal fired, `2` tool error.
-- All filesystem and SQLite access is read-only against the Hermes runtime;
-  Talaria never modifies `state.db` or rotates logs.
+- All filesystem and SQLite access is **read-only against the Hermes runtime**
+  for inspection features (`hermes moa-truncation`, `paths`).
+  Write-bearing carve-outs are explicit: `talaria sync` copies profile
+  artefacts between profiles, and `talaria hermes fix-context-cache`
+  repairs `context_length_cache.yaml` in one profile. Neither touches
+  `state.db` or rotates logs.
 - Every CLI subcommand must accept `--json` and a human-readable default renderer.
 
 ## Work Guidance
@@ -43,5 +47,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Child DOX Index
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
-- `hermos/` — Hermes-specific features (path resolution + per-feature checks).
-- `paths.py` — profile + path resolution shared by every feature.
+- `hermos/` — Hermes features: inspections, catalog refresh, and explicit context-cache repair.
+- `sync/` — Hermes sync feature group (the only write-bearing group; copies
+  profile artefacts between profiles).
+- `paths.py` — profile + path resolution shared by every inspection feature.

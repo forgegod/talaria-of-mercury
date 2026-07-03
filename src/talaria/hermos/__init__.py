@@ -7,6 +7,6 @@ check is the first feature.
 
 from __future__ import annotations
 
-from talaria.hermos import moa_truncation
+from talaria.hermos import context_cache_fix, moa_truncation, refresh_catalog
 
-__all__ = ["moa_truncation"]
+__all__ = ["context_cache_fix", "moa_truncation", "refresh_catalog"]
