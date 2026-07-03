@@ -15,7 +15,7 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 - **Profile-aware path resolution** — explicit flags win, then `$HERMES_PROFILE`, then `~/.hermes/active_profile`, then `default`.
 - **Structured JSON output** for cron, dashboards, and other agents.
 - **Reusable feature layout** — adding a new maintenance check is a new module under `talaria.hermos` or a sync phase under `talaria.sync`, not a top-level script.
-- **Zero network dependencies for inspection features.** Read-only features (e.g. `moa-truncation`) never talk to the network. The network-aware `refresh-catalog` command fetches the selected gateway catalog and writes that provider's Hermes manifest cache.
+- **Zero network dependencies for inspection features.** Read-only features (e.g. `moa-truncation`) never talk to the network. Network-aware maintenance commands (`refresh-catalog`, `install-skills-recursive`) fetch external catalog or skill metadata before writing profile artefacts.
 - **Write-bearing `talaria sync`.** The inspection features never modify `state.db` or logs; the `sync` feature group is the deliberate carve-out that copies profile *configuration* artefacts (config.yaml, SOUL.md, skills/, .env, context cache) between profiles.
 
 ## Features at a glance
@@ -25,6 +25,7 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 | `talaria paths`                  | —                                    | Print the resolved profile + paths Talaria would inspect.    |
 | `talaria hermes moa-truncation`  | `state.db`, `agent.log`, `errors.log`| Verify the MoA truncation mitigation (Signal A + Signal B).   |
 | `talaria hermes refresh-catalog` | selected gateway + XDG cache         | Refresh and reshape a gateway-backed model manifest.         |
+| `talaria hermes install-skills-recursive` | GitHub tree + profile config | Install every child skill under `.../*` and set enable policy. |
 | `talaria sync`                   | two profiles (or file paths)         | Copy config.yaml, SOUL.md, skills/, .env, context cache between profiles. |
 
 Each feature has its own dedicated section below with usage, flags, output schema, and exit codes.
@@ -94,6 +95,13 @@ talaria hermes refresh-catalog --gateway kilocode
 
 # Force a refresh and dump JSON
 talaria hermes refresh-catalog --force --json
+
+# Install every child skill below a skills.sh repo path; disabled by default
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*'
+
+# Enable only selected recursively installed skills
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' \
+  --enable api-and-interface-design context-engineering
 
 # Show what either feature would inspect without running it
 talaria hermes moa-truncation --show-resolution
@@ -250,6 +258,57 @@ The `fired` exit code (`1`) does not apply — there is no alert condition, only
 By default the feature skips the fetch when the cache is younger than `--max-age-seconds` (default `21600` / 6 hours). Use `--force` to refetch unconditionally.
 
 The selected gateway's API key is read from its configured environment variable first, then from `~/.hermes/.env`. For `--gateway kilocode`, use `KILOCODE_API_KEY=...` or `export KILOCODE_API_KEY=...`. Missing credential is reported as `reason: "auth"` with exit code `2`.
+
+## Feature: `talaria hermes install-skills-recursive`
+
+Installs every Hermes skill below a wildcard GitHub-backed skill identifier. This is a Talaria wrapper around the Hermes CLI: Talaria expands `.../*`, invokes `hermes skills install` once per child skill, then updates the selected profile's `config.yaml` so recursive third-party installs are disabled by default.
+
+### Usage
+
+```bash
+# Install all child skills and disable them by default
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*'
+
+# Enable all installed child skills immediately
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' --force-enable
+
+# Enable only selected skills; all other installed children stay disabled
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' \
+  --enable api-and-interface-design context-engineering
+
+# Preview expansion and config policy without installing or writing config.yaml
+talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
+```
+
+### Flags
+
+| Flag              | Default | Effect                                                                 |
+|-------------------|---------|------------------------------------------------------------------------|
+| `identifier`      | —       | Recursive identifier ending in `/*`, e.g. `skills-sh/owner/repo/path/*`. |
+| `--profile`       | active  | Hermes profile to install into and whose `config.yaml` is updated.     |
+| `--force`         | off     | Pass `--force` to each `hermes skills install` invocation.             |
+| `--force-enable`  | off     | Enable every successfully installed child skill.                       |
+| `--force-enalbe`  | off     | Typo-compatible alias for `--force-enable`.                            |
+| `--enable SKILL...` | none  | Enable only matching skill names or identifiers; disable the rest.     |
+| `--dry-run`       | off     | Expand and report policy without invoking Hermes or writing config.    |
+| `--no-backup`     | off     | Skip `.bak` backup before updating `config.yaml`.                      |
+| `--json`          | off     | Emit the structured report.                                            |
+| `--show-resolution` | off   | Print expanded identifiers and target config path, then exit.          |
+
+### Enable policy
+
+After installation, Talaria writes `skills.disabled` in the selected profile config:
+
+- default: every successfully installed child skill is disabled.
+- `--force-enable`: every successfully installed child skill is enabled.
+- `--enable A B`: only selected children are enabled; every other installed child is disabled.
+
+### Exit codes
+
+| Code | Meaning                                      |
+|------|----------------------------------------------|
+| `0`  | Expansion, installs, and config policy passed. |
+| `2`  | Tool error — expansion, install, or write failed. |
 
 ## Feature: `talaria sync`
 

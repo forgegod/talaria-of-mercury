@@ -7,6 +7,11 @@ check is the first feature.
 
 from __future__ import annotations
 
-from talaria.hermos import context_cache_fix, moa_truncation, refresh_catalog
+from talaria.hermos import (
+    context_cache_fix,
+    moa_truncation,
+    refresh_catalog,
+    skill_install,
+)
 
-__all__ = ["context_cache_fix", "moa_truncation", "refresh_catalog"]
+__all__ = ["context_cache_fix", "moa_truncation", "refresh_catalog", "skill_install"]

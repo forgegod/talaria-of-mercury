@@ -20,7 +20,9 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   for inspection features (`hermes moa-truncation`, `paths`).
   Write-bearing carve-outs are explicit: `talaria sync` copies profile
   artefacts between profiles, and `talaria hermes fix-context-cache`
-  repairs `context_length_cache.yaml` in one profile. Neither touches
+  repairs `context_length_cache.yaml` in one profile, and
+  `talaria hermes install-skills-recursive` installs third-party skills
+  then updates that profile's `skills.disabled` policy. None touches
   `state.db` or rotates logs.
 - Every CLI subcommand must accept `--json` and a human-readable default renderer.
 
@@ -47,7 +49,8 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Child DOX Index
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
-- `hermos/` — Hermes features: inspections, catalog refresh, and explicit context-cache repair.
+- `hermos/` — Hermes features: inspections, catalog refresh, explicit
+  context-cache repair, and recursive skill install orchestration.
 - `sync/` — Hermes sync feature group (the only write-bearing group; copies
   profile artefacts between profiles).
 - `paths.py` — profile + path resolution shared by every inspection feature.

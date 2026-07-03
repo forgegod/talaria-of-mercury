@@ -19,6 +19,9 @@ caches.
 - `context_cache_fix` is profile-scoped by design — it repairs only the
   selected profile's `context_length_cache.yaml` using a curated fix table
   and preserves unrelated cache entries.
+- `skill_install` is profile-scoped by design — it expands recursive skill
+  identifiers, invokes `hermes skills install` for each child skill, and
+  updates only that profile's `config.yaml` skill enable/disable policy.
 
 ## Local Contracts
 
@@ -38,6 +41,9 @@ caches.
 - `context_cache_fix` reports use `ok: bool` and `changed: bool`.
   Writes must go through the same atomic backup writer used by sync.
   `--dry-run` must not write a cache file or backup.
+- `skill_install` reports use `ok: bool`; recursive installs are disabled by
+  default via `skills.disabled` unless `--force-enable` or `--enable` says
+  otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
 
 ## Work Guidance
 
@@ -50,6 +56,8 @@ caches.
   does the fetch + reshape + write path inside the Python CLI.
 - `context_cache_fix.KNOWN_CONTEXT_FIXES` must stay small and source-backed;
   do not add speculative model windows.
+- Skill installation must delegate actual install semantics to `hermes skills
+  install`; do not vendor or copy Hermes' hub installer into Talaria.
 
 ## Verification
 
@@ -63,6 +71,8 @@ caches.
 - `context_cache_fix` tests cover bad existing entries, missing-key
   insertion, `--only-existing`, dry-run write suppression, and CLI profile
   resolution.
+- `skill_install` tests cover GitHub tree expansion, default-disabled policy,
+  selected enablement, force-enable, dry-run suppression, and CLI flags.
 
 ## Child DOX Index
 
@@ -72,3 +82,5 @@ caches.
   the matching Hermes provider manifest cache. Profile-agnostic.
 - `context_cache_fix.py` — repair curated known-bad entries in a profile's
   `context_length_cache.yaml` with atomic writes and backups.
+- `skill_install.py` — expand recursive skill identifiers and run per-skill
+  Hermes installs, then update `skills.disabled` in profile config.

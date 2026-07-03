@@ -143,6 +143,31 @@ def cmd_hermes_fix_context_cache(args: argparse.Namespace) -> int:
     return exit_code
 
 
+# ---------- Subcommand: talaria hermes install-skills-recursive ----------
+def cmd_hermes_install_skills_recursive(args: argparse.Namespace) -> int:
+    from talaria.hermos import skill_install
+
+    paths = resolve_paths(profile_flag=args.profile)
+    if args.show_resolution:
+        print(skill_install.show_resolution(paths, identifier=args.identifier))
+        return 0
+    report = skill_install.run(
+        paths,
+        identifier=args.identifier,
+        force=args.force,
+        force_enable=args.force_enable,
+        enable=list(args.enable or []),
+        apply=not args.dry_run,
+        no_backup=args.no_backup,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    exit_code, text = skill_install.render_human(report)
+    print(text)
+    return exit_code
+
+
 # ---------- Subcommand: talaria sync ----------
 def _build_sync_options(args: argparse.Namespace) -> SyncOptions:
     """Translate argparse ``Namespace`` into a :class:`SyncOptions`.
@@ -379,6 +404,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the resolved cache path and known-fix table, then exit.",
     )
     p_context.set_defaults(func=cmd_hermes_fix_context_cache)
+
+    # talaria hermes install-skills-recursive
+    p_skill_install = hermes_sub.add_parser(
+        "install-skills-recursive",
+        help="Install every skill under a wildcard Hermes skill identifier.",
+        description=(
+            "Expand a recursive skill identifier such as "
+            "skills-sh/owner/repo/path/*, run hermes skills install for "
+            "each child skill, and update skills.disabled so third-party "
+            "recursive installs are disabled by default."
+        ),
+    )
+    p_skill_install.add_argument(
+        "identifier",
+        help="Recursive skill identifier ending in /* (e.g. skills-sh/addyosmani/agent-skills/*).",
+    )
+    p_skill_install.add_argument(
+        "--profile", help="Hermes profile to install into and whose config.yaml to update.",
+    )
+    p_skill_install.add_argument(
+        "--force", action="store_true",
+        help="Pass --force to each hermes skills install invocation.",
+    )
+    p_skill_install.add_argument(
+        "--force-enable", "--force-enalbe", dest="force_enable", action="store_true",
+        help="Enable every installed skill instead of disabling recursive installs by default.",
+    )
+    p_skill_install.add_argument(
+        "--enable", nargs="*", default=[], metavar="SKILL",
+        help="Enable only these installed skill names or identifiers; all other installed skills are disabled.",
+    )
+    p_skill_install.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview expansion and config policy without installing or writing config.yaml.",
+    )
+    p_skill_install.add_argument(
+        "--no-backup", action="store_true",
+        help="Skip .bak backup before updating config.yaml.",
+    )
+    p_skill_install.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_skill_install.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print expanded skill identifiers and target config path, then exit.",
+    )
+    p_skill_install.set_defaults(func=cmd_hermes_install_skills_recursive)
 
     # talaria sync
     p_sync = sub.add_parser(

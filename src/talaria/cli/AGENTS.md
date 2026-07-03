@@ -38,6 +38,9 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.
 - Profile-scoped write features (e.g. `talaria hermes fix-context-cache`)
   must expose `--dry-run`, `--no-backup`, `--json`, and `--show-resolution`.
+- `talaria hermes install-skills-recursive` expands wildcard skill identifiers
+  and delegates actual installation to the Hermes CLI; Talaria only owns the
+  recursive expansion and `skills.disabled` policy update.
 
 ## Verification
 
