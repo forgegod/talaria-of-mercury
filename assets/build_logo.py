@@ -65,7 +65,131 @@ GLYPH_BAND_HEIGHT = 30
 # ---------------------------------------------------------------------------
 # SVG rendering — glyph
 # ---------------------------------------------------------------------------
-def _solid_3_paths() -> tuple[str, str, float, float, float, float]:
+# Base bar geometry — single source of truth used by every hallux
+# variant below.
+_BASE_TOP = 170
+_BASE_BOTTOM = 184
+_BASE_LEFT = 22
+_BASE_RIGHT = 218
+
+# Wing curves — IDENTICAL across all hallux variants.  Three
+# cubic-Bézier feathers converging on (84, 130) on the left side
+# and (156, 130) on the right side, then a Q-curve sweeping the
+# lower feather tip down to the base bar's outer corner.
+_WING_TOP_LEFT = (
+    "M 120 70 "
+    "C 90 30, 50 22, 22 50 "
+    "C 38 60, 60 65, 78 70 "
+    "C 50 70, 18 82, 12 110 "
+    "C 38 100, 64 95, 80 92 "
+    "C 50 102, 24 120, 22 150 "
+    "C 50 145, 70 138, 84 130"
+)
+_WING_TOP_RIGHT = (
+    "M 120 70 "
+    "C 150 30, 190 22, 218 50 "
+    "C 202 60, 180 65, 162 70 "
+    "C 190 70, 222 82, 228 110 "
+    "C 202 100, 176 95, 160 92 "
+    "C 190 102, 216 120, 218 150 "
+    "C 190 145, 170 138, 156 130"
+)
+
+
+def _hallux_trail(*, left: bool, variant: str) -> str:
+    """Return the base-bar + hallux trail appended to the wing
+    curve.  Mirrored on both sides via the `left` flag.
+
+    Variants:
+      "none" (production default) — straight Q-curve → outer
+        corner → base bar bottom → centreline.  No hallux.
+      "a-outer-small" — small outer toe-knob (~12u wide, ~7u
+        tall) past the outer edge of the base bar.  Amber band
+        stays continuous.
+      "b-outer-large" — larger outer toe-blob (~22u wide, ~14u
+        tall) past the outer edge, dipping 4u below the sole so
+        the toe is the lowest point on the glyph.  Amber band
+        stays continuous.
+      "c-inner-medial" — inner hallux on the medial side
+        (toward the centreline, anatomically correct big-toe
+        side), ~12u wide × 6u tall.  The two halluces meet at
+        the centreline, creating a small notch in the amber
+        ribbon where the toes kiss.
+    """
+    if variant == "none":
+        if left:
+            return (
+                f" Q 60 164, {_BASE_LEFT} {_BASE_TOP} "
+                f"L {_BASE_LEFT} {_BASE_BOTTOM} "
+                f"L 120 {_BASE_BOTTOM} Z"
+            )
+        return (
+            f" Q 180 164, {_BASE_RIGHT} {_BASE_TOP} "
+            f"L {_BASE_RIGHT} {_BASE_BOTTOM} "
+            f"L 120 {_BASE_BOTTOM} Z"
+        )
+
+    if variant == "a-outer-small":
+        if left:
+            return (
+                f" Q 60 164, {_BASE_LEFT} {_BASE_TOP} "
+                # toe: round out past x=22, height ~7u
+                f"C 14 168, 8 174, 12 180 "
+                f"L {_BASE_LEFT} {_BASE_BOTTOM} "
+                f"L 120 {_BASE_BOTTOM} Z"
+            )
+        return (
+            f" Q 180 164, {_BASE_RIGHT} {_BASE_TOP} "
+            f"C 226 168, 232 174, 228 180 "
+            f"L {_BASE_RIGHT} {_BASE_BOTTOM} "
+            f"L 120 {_BASE_BOTTOM} Z"
+        )
+
+    if variant == "b-outer-large":
+        if left:
+            return (
+                f" Q 60 164, {_BASE_LEFT} {_BASE_TOP} "
+                # toe: large round blob, dips 4u below sole
+                f"C 12 166, 0 172, 0 180 "
+                f"C 0 188, 10 190, 18 188 "
+                f"L {_BASE_LEFT} {_BASE_BOTTOM} "
+                f"L 120 {_BASE_BOTTOM} Z"
+            )
+        return (
+            f" Q 180 164, {_BASE_RIGHT} {_BASE_TOP} "
+            f"C 228 166, 240 172, 240 180 "
+            f"C 240 188, 230 190, 222 188 "
+            f"L {_BASE_RIGHT} {_BASE_BOTTOM} "
+            f"L 120 {_BASE_BOTTOM} Z"
+        )
+
+    if variant == "c-inner-medial":
+        if left:
+            return (
+                f" Q 60 164, {_BASE_LEFT} {_BASE_TOP} "
+                f"L {_BASE_LEFT} {_BASE_BOTTOM} "
+                # bar bottom runs past the centreline to x=134
+                f"L 134 {_BASE_BOTTOM} "
+                # inner hallux: round toward the centreline
+                f"C 132 178, 124 176, 120 182 "
+                f"C 116 186, 120 188, 124 188 "
+                f"L 120 {_BASE_BOTTOM} Z"
+            )
+        return (
+            f" Q 180 164, {_BASE_RIGHT} {_BASE_TOP} "
+            f"L {_BASE_RIGHT} {_BASE_BOTTOM} "
+            f"L 106 {_BASE_BOTTOM} "
+            f"C 108 178, 116 176, 120 182 "
+            f"C 124 186, 120 188, 116 188 "
+            f"L 120 {_BASE_BOTTOM} Z"
+        )
+
+    raise ValueError(f"unknown hallux variant: {variant!r}")
+
+
+def _solid_3_paths(
+    hallux_variant: str = "a-outer-small",
+) -> tuple[str, str, float, float, float, float]:
     """Return (left_path, right_path, base_left, base_right, base_top,
     base_bottom) for the solid_3 winged-sandal glyph.
 
@@ -80,45 +204,24 @@ def _solid_3_paths() -> tuple[str, str, float, float, float, float]:
     bar without a stripeline.  The base bar IS the lower part of
     the glyph.
 
+    Hallux variants: "none" (production default, no toe),
+    "a-outer-small", "b-outer-large", "c-inner-medial".  See
+    `_hallux_trail()` for the geometry of each variant.
+
     Glyph viewBox: 240 wide x 184 tall.  Wing tips at y=22, base
     bar from y=170 to y=184, x=22 to x=218.  Smooth cubic
     Béziers only — no stair-stepping.
     """
-    base_top = 170
-    base_bottom = 184
-    base_left = 22
-    base_right = 218
-    left = (
-        f"M 120 70 "
-        f"C 90 30, 50 22, 22 50 "
-        f"C 38 60, 60 65, 78 70 "
-        f"C 50 70, 18 82, 12 110 "
-        f"C 38 100, 64 95, 80 92 "
-        f"C 50 102, 24 120, 22 150 "
-        f"C 50 145, 70 138, 84 130 "
-        # Q-curve sweeps the lower feather tip down to the base
-        # bar's outer corner.  The base bar (from y=170 to y=184)
-        # is part of the same path, so the wing tapers seamlessly
-        # into the bar without a visible flat edge or seam.
-        f"Q 60 164, {base_left} {base_top} "
-        f"L {base_left} {base_bottom} "
-        f"L 120 {base_bottom} "
-        f"Z"
+    left = _WING_TOP_LEFT + _hallux_trail(left=True, variant=hallux_variant)
+    right = _WING_TOP_RIGHT + _hallux_trail(left=False, variant=hallux_variant)
+    return (
+        left,
+        right,
+        _BASE_LEFT,
+        _BASE_RIGHT,
+        _BASE_TOP,
+        _BASE_BOTTOM,
     )
-    right = (
-        f"M 120 70 "
-        f"C 150 30, 190 22, 218 50 "
-        f"C 202 60, 180 65, 162 70 "
-        f"C 190 70, 222 82, 228 110 "
-        f"C 202 100, 176 95, 160 92 "
-        f"C 190 102, 216 120, 218 150 "
-        f"C 190 145, 170 138, 156 130 "
-        f"Q 180 164, {base_right} {base_top} "
-        f"L {base_right} {base_bottom} "
-        f"L 120 {base_bottom} "
-        f"Z"
-    )
-    return left, right, base_left, base_right, base_top, base_bottom
 
 
 def _palm_frond_paths() -> tuple[str, str, float, float, float, float]:
@@ -210,6 +313,7 @@ def render_glyph(
     band_height: float | None = None,
     band_top_local: float | None = None,
     band_id: str = "talaria-glyph-band",
+    hallux_variant: str = "a-outer-small",
 ) -> str:
     """Render the production glyph (winged-sandal solid_3) with
     the bicolour ribbon overlay.
@@ -243,7 +347,7 @@ def render_glyph(
         LOCKUP-coordinate path is skipped entirely.
     """
     left, right, base_left, base_right, base_top, base_bottom = (
-        _solid_3_paths()
+        _solid_3_paths(hallux_variant=hallux_variant)
     )
 
     base_w = base_right - base_left
@@ -388,7 +492,7 @@ def _glyph_origin_y_for_baseline() -> int:
     return word_baseline_y - 184
 
 
-def render_lockup() -> str:
+def render_lockup(*, hallux_variant: str = "a-outer-small") -> str:
     """Production lockup: winged-sandal solid_3 glyph + TALARIA
     wordmark on a transparent background.
 
@@ -403,6 +507,7 @@ def render_lockup() -> str:
     glyph = render_glyph(
         origin_x=PADDING_X,
         origin_y=glyph_origin_y,
+        hallux_variant=hallux_variant,
     )
     word_baseline_y = _word_baseline_y_in_lockup()
     word = render_wordmark(
@@ -422,7 +527,7 @@ def render_lockup() -> str:
     )
 
 
-def render_mark_only() -> str:
+def render_mark_only(*, hallux_variant: str = "a-outer-small") -> str:
     """Square mark-only: winged-sandal solid_3 glyph on a transparent
     background, centred with padding.
 
@@ -439,6 +544,7 @@ def render_mark_only() -> str:
         origin_y=pad,
         band_top_local=GLYPH_BAND_TOP_LOCAL,
         band_height=GLYPH_BAND_HEIGHT,
+        hallux_variant=hallux_variant,
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -450,12 +556,80 @@ def render_mark_only() -> str:
 
 
 def main() -> None:
+    """CLI entry point.
+
+    Default behaviour (no flags): render the production
+    `logo.svg` and `logo-mark.svg` with the production
+    hallux variant `"a-outer-small"` — a small outer toe-knob
+    on each end of the base bar (the chosen production
+    geometry).
+
+    `--variant NAME` selects an alternate hallux variant for
+    both outputs:
+      a-outer-small   — PRODUCTION default.  Small outer
+        toe-knob, ~12u × ~7u past the outer end of the base
+        bar.  Amber band stays clean.
+      none            — No hallux (the pre-2026-07-04
+        production geometry, kept for comparison only).
+      b-outer-large   — Larger outer toe-blob, ~22u × ~14u,
+        dipping 4u below the sole.  Reference only.
+      c-inner-medial  — Inner hallux toward the centreline.
+        Reference only.
+
+    `--drafts` writes the four comparison sets
+    (`none` + `a-outer-small` + `b-outer-large` +
+    `c-inner-medial`) under `assets/drafts/` for inspection.
+    The canonical `logo.svg` / `logo-mark.svg` are NOT
+    touched in drafts mode.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Render the Talaria winged-sandal logo SVGs."
+    )
+    parser.add_argument(
+        "--variant",
+        choices=["a-outer-small", "none", "b-outer-large", "c-inner-medial"],
+        default="a-outer-small",
+        help="Hallux variant to apply to the glyph (default: a-outer-small, the production geometry).",
+    )
+    parser.add_argument(
+        "--drafts",
+        action="store_true",
+        help=(
+            "Write the four comparison sets (none + a + b + c) "
+            "under assets/drafts/ for operator inspection.  The "
+            "canonical logo.svg / logo-mark.svg are NOT touched."
+        ),
+    )
+    args = parser.parse_args()
+
     out_dir = Path(__file__).parent
-    (out_dir / "logo.svg").write_text(render_lockup())
-    (out_dir / "logo-mark.svg").write_text(render_mark_only())
+
+    if args.drafts:
+        drafts_dir = out_dir / "drafts"
+        drafts_dir.mkdir(exist_ok=True)
+        for label in ["none", "a-outer-small", "b-outer-large", "c-inner-medial"]:
+            suffix = "" if label == "none" else f"-{label}"
+            (drafts_dir / f"logo{suffix}.svg").write_text(
+                render_lockup(hallux_variant=label)
+            )
+            (drafts_dir / f"logo-mark{suffix}.svg").write_text(
+                render_mark_only(hallux_variant=label)
+            )
+        print(f"lockup: {LOCKUP_W} x {LOCKUP_H}")
+        print(f"wrote 4 lockup+mark pairs under {drafts_dir}/")
+        return
+
+    (out_dir / "logo.svg").write_text(render_lockup(hallux_variant=args.variant))
+    (out_dir / "logo-mark.svg").write_text(
+        render_mark_only(hallux_variant=args.variant)
+    )
 
     print(f"lockup: {LOCKUP_W} x {LOCKUP_H}")
-    print("wrote logo.svg, logo-mark.svg")
+    print(
+        f"wrote logo.svg, logo-mark.svg (hallux_variant={args.variant!r})"
+    )
 
 
 if __name__ == "__main__":
