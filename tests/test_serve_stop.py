@@ -1,10 +1,10 @@
 """Tests for talaria.hermos.serve_stop.
 
-Layout (mirrors test_refresh_catalog.py):
+Layout:
 
-* TestProcParsing — /proc/net/tcp + port/inode decoding
-* TestPidLookup — inode→PID via /proc/<pid>/fd
-* TestRun — full orchestration across all branches (mocked /proc + PIDs)
+* TestFindPids — psutil net_connections parsing, port filter, self-exclusion, dedup
+* TestRun — full orchestration across all branches (mocked psutil + PIDs)
+* TestPidAlive — os.kill(0) + psutil.pid_exists fallback
 * TestRenderer — verdicts and exit codes
 * TestCli — argparse + subprocess --help + --show-resolution + --json
 """
@@ -16,8 +16,9 @@ import os
 import signal
 import subprocess
 import sys
-from pathlib import Path
+from collections import namedtuple
 
+import psutil
 import pytest
 
 from talaria.hermos import serve_stop
@@ -26,34 +27,26 @@ from talaria.paths import ResolvedPaths
 
 # ---------- Helpers ----------
 
-def _write_proc_net(path: Path, rows: list[tuple[int, str, str]]) -> None:
-    """Write a synthetic /proc/net/tcp file.
+Addr = namedtuple("Addr", ["ip", "port"])
 
-    rows = [(port, state, inode), ...] e.g. (9119, "0A", "12345").
-    The port is encoded to hex so callers never have to compute it.
+
+def _conn(pid: int | None, port: int, status=psutil.CONN_LISTEN, family=0, laddr=None, raddr=None):
+    """Build a psutil-like connection namedtuple.
+
+    ``pid`` is the owning PID; ``port`` is the LISTEN port when status is
+    CONN_LISTEN.  ``pid=None`` matches a socket psutil could not resolve an
+    owner for.
     """
-    header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
-    lines = [header]
-    for i, (port, st, inode) in enumerate(rows):
-        port_hex = f"{port:04X}"
-        local = f"0100007F:{port_hex}"
-        # Pad the row like the real kernel output.
-        lines.append(
-            f"   {i}: {local:<14} 00000000:0000 {st} 00000000:00000000 00:00000000 00000000     0        0 {inode} 1 0000000000000000 100 0 0 10 0\n"
-        )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines))
+    if laddr is None:
+        laddr = Addr("127.0.0.1", port)
+    if raddr is None:
+        raddr = ()
+    return namedtuple(
+        "conn", ["fd", "family", "type", "laddr", "raddr", "status", "pid"]
+    )(fd=-1, family=family, type=1, laddr=laddr, raddr=raddr, status=status, pid=pid)
 
 
-def _make_fd_socket_link(proc_root: Path, pid: int, inode: int) -> None:
-    """Create a /proc/<pid>/fd/N symlink pointing at socket:[<inode>]."""
-    fd_dir = proc_root / str(pid) / "fd"
-    fd_dir.mkdir(parents=True, exist_ok=True)
-    link = fd_dir / "3"
-    link.symlink_to(f"socket:[{inode}]")
-
-
-def _paths(tmp_path: Path) -> ResolvedPaths:
+def _paths(tmp_path) -> ResolvedPaths:
     return ResolvedPaths(
         profile="test", hermes_root=tmp_path,
         state_db=tmp_path / "state.db",
@@ -61,105 +54,91 @@ def _paths(tmp_path: Path) -> ResolvedPaths:
     )
 
 
-# ---------- TestProcParsing ----------
-
-class TestProcParsing:
-    def test_parse_listening_inodes(self, tmp_path: Path) -> None:
-        net = tmp_path / "net"
-        _write_proc_net(net / "tcp", [
-            (9119, "0A", "1001"),   # LISTEN on 9119
-            (80, "0A", "1002"),     # LISTEN on port 80
-            (9119, "06", "1003"),   # TIME_WAIT on 9119 — ignored
-        ])
-        inodes = serve_stop._listening_inodes_for_port(9119, net_root=net)
-        assert inodes == {1001}
-
-    def test_parse_handles_missing_tcp6(self, tmp_path: Path) -> None:
-        net = tmp_path / "net"
-        net.mkdir()
-        _write_proc_net(net / "tcp", [(9119, "0A", "1001")])
-        # tcp6 absent — should not raise.
-        inodes = serve_stop._listening_inodes_for_port(9119, net_root=net)
-        assert inodes == {1001}
-
-    def test_parse_empty_file(self, tmp_path: Path) -> None:
-        net = tmp_path / "net"
-        net.mkdir()
-        (net / "tcp").write_text("  sl  local_address rem_address   st\n")
-        inodes = serve_stop._listening_inodes_for_port(9119, net_root=net)
-        assert inodes == set()
-
-    def test_hex_port_decodes(self) -> None:
-        assert serve_stop._hex_port("0100007F:23AF") == 0x23AF
-        assert serve_stop._hex_port("0100007F:0050") == 80
-        assert serve_stop._hex_port("garbage") is None
-        assert serve_stop._hex_port("0100007F:nothex") is None
+def _mock_net_connections(monkeypatch, conns):
+    """Stub psutil.net_connections to return *conns*."""
+    monkeypatch.setattr(serve_stop.psutil, "net_connections", lambda kind="inet": conns)
 
 
-# ---------- TestPidLookup ----------
+# ---------- TestFindPids ----------
 
-class TestPidLookup:
-    def test_finds_pid_owning_inode(self, tmp_path: Path) -> None:
-        _make_fd_socket_link(tmp_path, 4242, 1001)
-        _make_fd_socket_link(tmp_path, 5353, 9999)
-        pids = serve_stop._pids_for_inodes({1001}, proc_root=tmp_path)
+class TestFindPids:
+    def test_finds_pid_listening_on_port(self, monkeypatch) -> None:
+        conns = [
+            _conn(4242, 9119),                # LISTEN on 9119 — match
+            _conn(5353, 80),                  # LISTEN on 80 — no match
+            _conn(None, 9119),                # no owner — ignored
+        ]
+        _mock_net_connections(monkeypatch, conns)
+        pids = serve_stop.find_serve_pids(9119)
         assert pids == [4242]
 
-    def test_excludes_self_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_excludes_self_pid(self, monkeypatch) -> None:
         self_pid = os.getpid()
-        _make_fd_socket_link(tmp_path, self_pid, 1001)
-        _make_fd_socket_link(tmp_path, 11111, 1001)
-        pids = serve_stop._pids_for_inodes({1001}, proc_root=tmp_path)
+        conns = [
+            _conn(self_pid, 9119),            # our own socket — excluded
+            _conn(11111, 9119),               # other process — included
+        ]
+        _mock_net_connections(monkeypatch, conns)
+        pids = serve_stop.find_serve_pids(9119)
         assert self_pid not in pids
         assert 11111 in pids
 
-    def test_empty_inodes_returns_empty(self, tmp_path: Path) -> None:
-        _make_fd_socket_link(tmp_path, 11111, 1001)
-        assert serve_stop._pids_for_inodes(set(), proc_root=tmp_path) == []
+    def test_ignores_non_listen_states(self, monkeypatch) -> None:
+        conns = [
+            _conn(1234, 9119, status=psutil.CONN_ESTABLISHED),
+            _conn(5678, 9119, status=psutil.CONN_CLOSE_WAIT),
+            _conn(4242, 9119, status=psutil.CONN_LISTEN),
+        ]
+        _mock_net_connections(monkeypatch, conns)
+        pids = serve_stop.find_serve_pids(9119)
+        assert pids == [4242]
 
-    def test_deduplicates_pid_with_multiple_fds(self, tmp_path: Path) -> None:
-        pid_dir = tmp_path / "2222" / "fd"
-        pid_dir.mkdir(parents=True)
-        (pid_dir / "3").symlink_to("socket:[1001]")
-        (pid_dir / "4").symlink_to("socket:[1001]")
-        pids = serve_stop._pids_for_inodes({1001}, proc_root=tmp_path)
+    def test_deduplicates_pid_with_multiple_sockets(self, monkeypatch) -> None:
+        conns = [
+            _conn(2222, 9119),
+            _conn(2222, 9119),                # same PID, same port — dedup
+        ]
+        _mock_net_connections(monkeypatch, conns)
+        pids = serve_stop.find_serve_pids(9119)
         assert pids == [2222]
 
-    def test_missing_proc_root_returns_empty(self, tmp_path: Path) -> None:
-        ghost = tmp_path / "does-not-exist"
-        assert serve_stop._pids_for_inodes({1001}, proc_root=ghost) == []
+    def test_ignores_connection_with_no_laddr(self, monkeypatch) -> None:
+        conn = namedtuple("conn", ["fd", "family", "type", "laddr", "raddr", "status", "pid"])(
+            fd=-1, family=0, type=1, laddr=None, raddr=None,
+            status=psutil.CONN_LISTEN, pid=1234,
+        )
+        _mock_net_connections(monkeypatch, [conn])
+        assert serve_stop.find_serve_pids(9119) == []
+
+    def test_returns_empty_on_psutil_error(self, monkeypatch) -> None:
+        def boom(kind="inet"):
+            raise psutil.AccessDenied("denied")
+        monkeypatch.setattr(serve_stop.psutil, "net_connections", boom)
+        assert serve_stop.find_serve_pids(9119) == []
+
+    def test_returns_empty_on_oserror(self, monkeypatch) -> None:
+        def boom(kind="inet"):
+            raise OSError("nope")
+        monkeypatch.setattr(serve_stop.psutil, "net_connections", boom)
+        assert serve_stop.find_serve_pids(9119) == []
+
+    def test_empty_connection_list(self, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [])
+        assert serve_stop.find_serve_pids(9119) == []
 
 
 # ---------- TestRun ----------
 
 class TestRun:
-    def test_unsupported_platform_when_no_proc(self, tmp_path: Path,
-                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-        # Point proc_root at a dir with no net/tcp.
-        empty = tmp_path / "empty_proc"
-        empty.mkdir()
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(empty))
-        report = serve_stop.run(_paths(tmp_path), port=9119)
-        assert report["ok"] is False
-        assert report["reason"] == "unsupported"
-
-    def test_none_when_port_silent(self, tmp_path: Path,
-                                    monkeypatch: pytest.MonkeyPatch) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(80, "0A", "1002")])  # port 80, not 9119
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_none_when_port_silent(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 80)])  # port 80, not 9119
         report = serve_stop.run(_paths(tmp_path), port=9119)
         assert report["ok"] is True
         assert report["reason"] == "none"
         assert report["found_pids"] == []
 
-    def test_dry_run_reports_detected_without_signalling(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 12345, 1001)
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_dry_run_reports_detected_without_signalling(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 9119)])
 
         kills: list[tuple[int, int]] = []
         monkeypatch.setattr(serve_stop.os, "kill", lambda pid, sig: kills.append((pid, sig)))
@@ -170,13 +149,8 @@ class TestRun:
         assert report["found_pids"] == [12345]
         assert kills == []  # no signal sent
 
-    def test_stop_sends_sigterm_then_sigkill_on_survivor(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 12345, 1001)
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_stop_sends_sigterm_then_sigkill_on_survivor(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 9119)])
 
         # Force the PID to always look alive so SIGKILL is reached.
         monkeypatch.setattr(serve_stop, "_pid_alive", lambda pid: True)
@@ -190,18 +164,11 @@ class TestRun:
         assert (12345, signal.SIGTERM) in sent
         assert (12345, signal.SIGKILL) in sent
 
-    def test_stop_clean_when_process_exits_after_sigterm(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 12345, 1001)
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_stop_clean_when_process_exits_after_sigterm(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 9119)])
 
-        # PID exits immediately after SIGTERM — no SIGKILL needed.
         alive = {"state": True}
-        monkeypatch.setattr(serve_stop, "_pid_alive",
-                            lambda pid: alive["state"])
+        monkeypatch.setattr(serve_stop, "_pid_alive", lambda pid: alive["state"])
 
         def fake_kill(pid: int, sig: int) -> None:
             if sig == signal.SIGTERM:
@@ -215,13 +182,8 @@ class TestRun:
         assert report["stopped_pids"] == [12345]
         assert report["failed_pids"] == []
 
-    def test_partial_failure_on_permission_denied(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 12345, 1001)
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_partial_failure_on_permission_denied(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 9119)])
 
         def fake_kill(pid: int, sig: int) -> None:
             raise PermissionError("not allowed")
@@ -233,13 +195,8 @@ class TestRun:
         assert report["reason"] == "partial"
         assert report["failed_pids"] == [12345]
 
-    def test_processlookup_counts_as_stopped(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 12345, 1001)
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_processlookup_counts_as_stopped(self, tmp_path, monkeypatch) -> None:
+        _mock_net_connections(monkeypatch, [_conn(12345, 9119)])
 
         def fake_kill(pid: int, sig: int) -> None:
             raise ProcessLookupError("gone")
@@ -251,13 +208,12 @@ class TestRun:
         assert report["reason"] == "stopped"
         assert report["stopped_pids"] == [12345]
 
-    def test_find_serve_pids_end_to_end(self, tmp_path: Path,
-                                          monkeypatch: pytest.MonkeyPatch) -> None:
-        proc = tmp_path / "proc"
-        _write_proc_net(proc / "net" / "tcp", [(9119, "0A", "1001")])
-        _make_fd_socket_link(proc, 7777, 1001)
-        _make_fd_socket_link(proc, 8888, 2002)  # unrelated inode
-        monkeypatch.setenv("TALARIA_PROC_ROOT", str(proc))
+    def test_find_serve_pids_end_to_end(self, monkeypatch) -> None:
+        conns = [
+            _conn(7777, 9119),
+            _conn(8888, 9118),                # different port — no match
+        ]
+        _mock_net_connections(monkeypatch, conns)
         pids = serve_stop.find_serve_pids(9119)
         assert pids == [7777]
 
@@ -269,9 +225,26 @@ class TestPidAlive:
         assert serve_stop._pid_alive(os.getpid()) is True
 
     def test_nonexistent_pid_is_gone(self) -> None:
-        # PID 0 is never a valid target on Linux.
-        # Use a very high PID unlikely to exist.
+        # PID 0 is never a valid target; use a very high PID unlikely to exist.
         assert serve_stop._pid_alive(999999) is False
+
+    def test_permission_denied_falls_back_to_psutil(self, monkeypatch) -> None:
+        # Simulate a process owned by another user: os.kill(pid,0) raises
+        # PermissionError, and psutil.pid_exists should be consulted.
+        def kill_raises(pid, sig):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(serve_stop.os, "kill", kill_raises)
+        monkeypatch.setattr(serve_stop.psutil, "pid_exists", lambda pid: True)
+        assert serve_stop._pid_alive(5555) is True
+
+    def test_permission_denied_psutil_confirms_dead(self, monkeypatch) -> None:
+        def kill_raises(pid, sig):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(serve_stop.os, "kill", kill_raises)
+        monkeypatch.setattr(serve_stop.psutil, "pid_exists", lambda pid: False)
+        assert serve_stop._pid_alive(5555) is False
 
 
 # ---------- TestRenderer ----------
@@ -304,13 +277,6 @@ class TestRenderer:
         ))
         assert code == 0
         assert "dry-run" in text
-
-    def test_unsupported_platform_exits_2(self) -> None:
-        code, text = serve_stop.render_human(self._report(
-            ok=False, reason="unsupported", found_pids=[], stopped_pids=[],
-        ))
-        assert code == 2
-        assert "Linux-only" in text
 
     def test_partial_failure_exits_2(self) -> None:
         code, text = serve_stop.render_human(self._report(

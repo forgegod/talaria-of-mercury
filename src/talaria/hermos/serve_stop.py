@@ -13,20 +13,20 @@ of those substrings are contiguous, the match fails, and ``--stop`` reports
 and bound to the port.
 
 This feature detects the backend the robust way: by the TCP port it is
-listening on.  A listening socket has a stable kernel identity (its inode)
-regardless of how the owning process was spelled on the command line, so
-``/proc/net/tcp`` → inode → PID via ``/proc/<pid>/fd`` finds the process
-that ``hermes serve --stop`` cannot.
+listening on.  A listening socket identifies its owning process
+independently of how that process was spelled on the command line, so
+``psutil.net_connections`` → PID finds the process that
+``hermes serve --stop`` cannot.
+
+psutil abstracts the platform-specific discovery substrate (``/proc/net``
+on Linux, libproc on macOS, the NT process/socket APIs on Windows) behind
+one call, so this feature is cross-platform without per-OS branches.
 
 Exit semantics (project-wide contract):
 
 * ``0`` — stopped at least one backend, or none was running.
-* ``2`` — tool error: not on Linux, a PID that could not be signalled,
-  or a port with no listener that the caller asserted was running.
-
-This feature is Linux-only (``/proc`` is the discovery substrate).  On
-other platforms it reports ``ok: False`` with ``reason: "unsupported"``
-rather than attempting a fallback.
+* ``2`` — tool error: a PID that could not be signalled, or a port with no
+  listener that the caller asserted was running.
 """
 
 from __future__ import annotations
@@ -34,8 +34,9 @@ from __future__ import annotations
 import os
 import signal
 import time
-from pathlib import Path
 from typing import Any
+
+import psutil
 
 from talaria.paths import ResolvedPaths
 
@@ -48,151 +49,41 @@ GRACEFUL_TIMEOUT_SECONDS = 5.0
 #: Poll interval while waiting for graceful exit.
 POLL_INTERVAL_SECONDS = 0.1
 
-#: TCP status code for ``LISTEN`` in ``/proc/net/tcp``.
-_TCP_LISTEN = "0A"
 
-
-def _parse_proc_net_tcp(path: Path) -> dict[int, int]:
-    """Return ``{socket_inode: 0}`` for every LISTEN socket in *path*.
-
-    Only the inode is needed; the value is a placeholder kept at ``0`` so
-    callers can treat the dict as a set with cheap membership tests while
-    still being able to extend it later if a use case needs the local
-    address.  The value is intentionally not the local port — that would
-    be misleading because one inode maps to exactly one listener.
-    """
-    inodes: dict[int, int] = {}
-    try:
-        text = path.read_text()
-    except OSError:
-        return inodes
-    for line in text.splitlines()[1:]:  # skip the header row
-        parts = line.split()
-        # min columns: sl local_address rem_address st tx_queue rx_queue ...
-        if len(parts) < 10:
-            continue
-        st = parts[3]
-        if st != _TCP_LISTEN:
-            continue
-        inode_field = parts[9]
-        try:
-            inode = int(inode_field)
-        except ValueError:
-            continue
-        if inode > 0:
-            inodes[inode] = 0
-    return inodes
-
-
-def _hex_port(local_address: str) -> int | None:
-    """Decode the port half of a ``/proc/net/tcp`` local address field.
-
-    The field is ``HEX_IP:HEX_PORT`` (e.g. ``"0100007F:23AF"``).  Only the
-    port is returned; the IP is discarded because we match by port, and
-    callers that need the address can read it from the raw line.
-    """
-    if ":" not in local_address:
-        return None
-    port_hex = local_address.rsplit(":", 1)[1]
-    try:
-        return int(port_hex, 16)
-    except ValueError:
-        return None
-
-
-def _listening_inodes_for_port(port: int, *, net_root: Path | None = None) -> set[int]:
-    """Return socket inodes LISTENing on *port* across tcp + tcp6.
-
-    ``net_root`` defaults to ``/proc/net`` and is overridable for tests.
-    """
-    root = net_root or Path("/proc/net")
-    hits: set[int] = set()
-    for name in ("tcp", "tcp6"):
-        path = root / name
-        try:
-            text = path.read_text()
-        except OSError:
-            continue
-        for line in text.splitlines()[1:]:
-            parts = line.split()
-            if len(parts) < 10:
-                continue
-            if parts[3] != _TCP_LISTEN:
-                continue
-            local = parts[1]
-            if _hex_port(local) != port:
-                continue
-            try:
-                inode = int(parts[9])
-            except ValueError:
-                continue
-            if inode > 0:
-                hits.add(inode)
-    return hits
-
-
-def _proc_fd_root() -> Path:
-    """Return the ``/proc`` filesystem root (overridable via env in tests)."""
-    return Path(os.environ.get("TALARIA_PROC_ROOT", "/proc"))
-
-
-def _pids_for_inodes(inodes: set[int], *, proc_root: Path | None = None) -> list[int]:
-    """Return PIDs that own any socket inode in *inodes*.
-
-    Scans ``/proc/<pid>/fd/*`` for socket symlinks whose target is
-    ``socket:[<inode>]``.  Each PID is reported at most once even if it
-    owns several matching sockets.  The current process is excluded so a
-    stop command never targets itself.
-    """
-    if not inodes:
-        return []
-    root = proc_root or _proc_fd_root()
-    self_pid = os.getpid()
-    targets = {f"socket:[{i}]" for i in inodes}
-    found: list[int] = []
-    try:
-        entries = list(root.iterdir())
-    except OSError:
-        return found
-    for entry in entries:
-        name = entry.name
-        if not name.isdigit():
-            continue
-        pid = int(name)
-        if pid == self_pid:
-            continue
-        fd_dir = entry / "fd"
-        try:
-            for fd in fd_dir.iterdir():
-                try:
-                    link = os.readlink(fd)
-                except OSError:
-                    continue
-                if link in targets:
-                    if pid not in found:
-                        found.append(pid)
-                    break
-        except OSError:
-            continue
-    return found
-
-
-def find_serve_pids(port: int = DEFAULT_SERVE_PORT, *, proc_root: Path | None = None) -> list[int]:
+def find_serve_pids(port: int = DEFAULT_SERVE_PORT) -> list[int]:
     """Return PIDs of processes listening on *port*.
 
-    Combines the port→inode lookup with the inode→PID lookup.  Returns an
-    empty list on Linux if nothing is listening, or on any platform where
-    ``/proc`` is unavailable.
+    Uses ``psutil.net_connections("inet")`` to enumerate every listening
+    TCP socket, filters by local port, and resolves each socket's owning
+    PID.  The current process is excluded so a stop command never targets
+    itself.  Returns an empty list when nothing is listening, psutil is
+    unavailable, or the process table cannot be enumerated.
     """
-    root = proc_root or _proc_fd_root()
-    net_root = root / "net"
-    inodes = _listening_inodes_for_port(port, net_root=net_root)
-    return _pids_for_inodes(inodes, proc_root=root)
+    self_pid = os.getpid()
+    pids: list[int] = []
+    try:
+        conns = psutil.net_connections("inet")
+    except (psutil.Error, OSError, PermissionError):
+        return pids
+    for conn in conns:
+        if conn.status != psutil.CONN_LISTEN:
+            continue
+        laddr = conn.laddr
+        if laddr is None:
+            continue
+        if getattr(laddr, "port", None) != port:
+            continue
+        pid = conn.pid
+        if pid is None or pid == self_pid:
+            continue
+        if pid not in pids:
+            pids.append(pid)
+    return pids
 
 
-def _is_listening(port: int, *, proc_root: Path | None = None) -> bool:
+def _is_listening(port: int) -> bool:
     """True iff at least one process is listening on *port*."""
-    return bool(find_serve_pids(port, proc_root=proc_root))
+    return bool(find_serve_pids(port))
 
 
 def _terminate_pids(pids: list[int], *, timeout: float = GRACEFUL_TIMEOUT_SECONDS,
@@ -240,8 +131,8 @@ def _pid_alive(pid: int) -> bool:
     """True if *pid* still exists.
 
     ``os.kill(pid, 0)`` is the cheap probe.  ``PermissionError`` means the
-    process exists but is owned by another user, so fall back to a
-    ``/proc/<pid>`` stat to confirm it is still alive.
+    process exists but is owned by another user, so fall back to psutil
+    to confirm it is still alive.
     """
     try:
         os.kill(pid, 0)
@@ -250,9 +141,8 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         try:
-            Path(f"/proc/{pid}").stat()
-            return True
-        except OSError:
+            return psutil.pid_exists(pid)
+        except (psutil.Error, OSError):
             return False
     except OSError:
         return False
@@ -289,7 +179,7 @@ def run(
 
         {
           "ok": bool,
-          "reason": str | None,   # "stopped" | "none" | "unsupported" | "partial"
+          "reason": str | None,   # "stopped" | "none" | "detected" | "partial"
           "port": int,
           "found_pids": [int, ...],
           "stopped_pids": [int, ...],
@@ -299,7 +189,8 @@ def run(
     * ``stopped`` — at least one backend was found and fully terminated.
     * ``none`` — no backend was listening on the port (success: nothing
       to stop).  ``ok`` is ``True``.
-    * ``unsupported`` — not on Linux (no ``/proc``); ``ok`` is ``False``.
+    * ``detected`` — dry-run: at least one backend found, no signal sent.
+      ``ok`` is ``True``.
     * ``partial`` — some PIDs could not be signalled; ``ok`` is ``False``.
     """
     report: dict[str, Any] = {
@@ -311,12 +202,7 @@ def run(
         "failed_pids": [],
     }
 
-    proc_root = _proc_fd_root()
-    if not (proc_root / "net" / "tcp").exists():
-        report["reason"] = "unsupported"
-        return report
-
-    pids = find_serve_pids(port, proc_root=proc_root)
+    pids = find_serve_pids(port)
     report["found_pids"] = list(pids)
 
     if not pids:
@@ -348,7 +234,7 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
     """Format *report* for the terminal.  Returns ``(exit_code, text)``.
 
     Exit codes: ``0`` for clean (stopped or nothing to stop), ``2`` for a
-    tool error (unsupported platform, partial failure).
+    tool error (partial failure).
     """
     lines: list[str] = []
     lines.append(f"Hermes serve-stop (port {report['port']})")
@@ -356,13 +242,6 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
     lines.append("")
 
     reason = report.get("reason")
-    if reason == "unsupported":
-        lines.append("ERROR: /proc/net not found — serve-stop is Linux-only.")
-        lines.append("  On macOS/Windows, stop the backend directly or use a process manager.")
-        lines.append("")
-        lines.append("=" * 60)
-        lines.append("VERDICT: tool error — unsupported platform.")
-        return 2, "\n".join(lines)
 
     if reason == "none":
         lines.append(f"No Hermes backend listening on port {report['port']}.")
