@@ -17,6 +17,7 @@ Talaria gives Hermes operators a single installable CLI for everything the agent
 - 🔄 **Keep profiles in sync** — copy config, SOUL.md, skills, `.env`, and context cache between profiles; refresh `.env` values from the live environment; derive model aliases from auxiliary pins.
 - 🗂️ **Refresh model catalogs** — fetch and reshape gateway-backed model manifests into Hermes' provider cache.
 - 🛑 **Stop runaway backends** — detect and gracefully terminate Hermes dashboard/serve processes by port (not cmdline pattern).
+- 🌀 **Bound log directories** — rotate active logs (copy → gzip → truncate), prune rotated copies and curator snapshots by age and aggregate size, and sweep every profile with `--all-profiles`.
 
 Every command follows the same conventions: profile-aware path resolution, structured JSON output for cron and dashboards, `--dry-run` for safe previews, and `--show-resolution` for path debugging.
 
@@ -30,6 +31,7 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
 | `talaria hermes fix-context-cache` | maintenance | Repair curated known-bad entries in a profile's context cache. |
 | `talaria hermes serve-stop` | maintenance | Detect and stop the Hermes dashboard/serve backend by port. |
+| `talaria hermes log-rotate` | maintenance | Rotate active logs (copy→gzip→truncate) and prune rotated copies + curator snapshots by age / aggregate size. |
 | `talaria skills install` | skills | Install skill(s) under an identifier (recursive if `/*`) with category and enable policy. |
 | `talaria skills uninstall` | skills | Uninstall skill(s) under an identifier and clean up `skills.disabled`. |
 | `talaria skills create-category` | skills | Create a skill category directory with an optional description. |
@@ -230,6 +232,50 @@ talaria hermes serve-stop --dry-run   # detect and report PIDs without sending a
 | `--show-resolution` | off | Print the port and detected PID(s), then exit. |
 
 Report `reason`: `stopped` | `none` | `detected` (dry-run) | `partial` (some PIDs survived SIGKILL).
+
+## Feature: `talaria hermes log-rotate`
+
+Rotates and prunes the active profile's `logs/` directory (or every profile's `logs/` with `--all-profiles`). Three orthogonal rules bound the directory size, all explicit and all opt-in:
+
+- **`--max-size BYTES`** rotates any active file whose gzipped payload would exceed the cap. The pattern is **copy → gzip → truncate**: the current bytes are copied to `<name>.<ext>.1.gz` (gzip level 6), then the source is truncated to zero. A second rotation overwrites the previous `.1.gz` (single-slot policy). Hermes writers append concurrently, so a `.N` shift would race them — the copy-then-truncate order is the same pattern newsyslog and logrotate use.
+- **`--max-age DAYS`** deletes rotated copies (`*.N` / `*.N.gz`) and `logs/curator/<ts>/` snapshot directories whose mtime is older than the threshold. Curator directories are removed as a single unit, never partially.
+- **`--max-total BYTES`** bounds the aggregate on-disk size of the directory by deleting the oldest rotated copies first, walking mtime-ascending until the total drops below the cap. Active files are rotated (not deleted) by this rule.
+
+A **`--keep N`** floor (default 1) protects the newest N rotated copies per base name regardless of age or aggregate size. **`--all-profiles`** sweeps the root `~/.hermes/logs/` plus every `~/.hermes/profiles/*/logs/` in one run. The tool is **explicit-only**: with no prune/rotate flag the file system is never touched — the report's `dry_run` is true regardless of `--dry-run`, and the `actions` list is empty. The default values shown below (10 MiB gziped, 30 days, 50 MiB total, keep 1) are documentation of sensible values; they are not implicit limits.
+
+### Usage
+
+```bash
+# Preview what would happen on the active profile — no bytes written
+talaria hermes log-rotate --dry-run \
+    --max-size 10485760 --max-age 30 --max-total 52428800
+
+# Apply: rotate files over 10 MiB gziped, delete rotated copies older
+# than 30 days, keep the directory below 50 MiB total
+talaria hermes log-rotate \
+    --max-size 10485760 --max-age 30 --max-total 52428800
+
+# Sweep every profile's logs/ in one go
+talaria hermes log-rotate --all-profiles --dry-run --json
+```
+
+### Flags
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--profile NAME` | active | Profile whose `logs/` to operate on. Ignored when `--all-profiles` is set. |
+| `--all-profiles` | off | Sweep the root `~/.hermes/logs/` plus every `~/.hermes/profiles/*/logs/` in one run. |
+| `--max-size BYTES` | off | Per-file cap on the gzipped payload. Active files over the cap are rotated (copy → `<name>.<ext>.1.gz` → truncate to 0). |
+| `--max-age DAYS` | off | Delete rotated copies and `logs/curator/<ts>/` directories older than the threshold. |
+| `--max-total BYTES` | off | Cap the aggregate directory size; oldest rotated copies are deleted first until the total drops below. |
+| `--keep N` | `1` | Minimum number of rotated copies to preserve per base name. Protects the newest N regardless of age or aggregate size. |
+| `--dry-run` | off | Plan actions without copying, gzipping, truncating, or deleting. |
+| `--json` | off | Emit JSON instead of human-readable output. |
+| `--show-resolution` | off | Print the resolved log dir, scanned size, and planned actions, then exit. |
+
+### Report shape
+
+Each per-directory report carries `profile`, `log_dir`, `ok`, `scanned_files`, `scanned_bytes`, `total_size_after`, `rotated_count`, `truncated_count`, `deleted_count`, `deleted_bytes`, `dry_run`, and a flat `actions` list. Each action entry is `{path, action, reason, size_before, size_after, compressed_size}` with `action` in `{rotate, copy, truncate, delete, skip}`. The `rotate` / `copy` / `truncate` triple for one active file appears as three separate entries so JSON consumers can follow the per-step effect. The JSON envelope for `--all-profiles` is `{"reports": [<report>, ...]}`.
 
 ## Feature: `talaria skills install`
 

@@ -58,5 +58,16 @@ Pytest suite for the Talaria CLI and library.
 - `test_completion.py` — bash/zsh completion script generation: parser-tree
   introspection, script structure, syntax validation (`bash -n` / `zsh -n`),
   functional bash completion via sourced script, and CLI subprocess.
+- `test_log_rotate.py` — rotation parser (`_parse_rotated` for active,
+  plain rotated, gz rotated, multi-digit index, README exclusion,
+  empty string), classifier (active/rotated/other), active
+  rotation (under cap skipped, over cap copies+gzip+truncates,
+  second rotation overwrites the first), age-based delete (old
+  rotated copies, curator snapshot directories, max-age=0 with
+  keep floor), aggregate size prune (oldest-first with keep floor,
+  under-cap no-op), keep floor (keep=2 protects two newest, keep=0
+  protects nothing), dry-run suppression, multi-profile target
+  enumeration, run/render shape, `show_resolution` option echo,
+  and CLI `--help`.
 - `_helpers.py` — `make_sessions_db(path, rows)`.
 - `conftest.py` — `fake_hermes_root`, `clean_env` fixtures.
