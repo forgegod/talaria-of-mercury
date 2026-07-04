@@ -34,6 +34,32 @@ background so it can be placed on any surface.
 
 ## Local Contracts
 
+- **Design choice (locked 2026-07-04)** — the production brand
+  consists of TWO artifacts on a transparent background:
+    - `logo.svg` — horizontal lockup (glyph + TALARIA wordmark).
+    - `logo-mark.svg` — square standalone mark (glyph only, SVG).
+
+  No drafts, no grid variants, no alternate geometries.  If a
+  future redesign is requested, propose changes to
+  `build_logo.py` as a single revision; do not reintroduce a
+  drafts/ subdirectory or multi-variant generator.
+
+- **Intentional "error" — no perfect band-to-baseline alignment**
+  — the amber ribbon on the glyph's lower feathers does NOT
+  perfectly align with the amber base bar's top edge.  The
+  band's lower edge is a straight horizontal line at glyph-local
+  y=180, but the wing's lower-feather curve dips below this
+  line at the outer corner (the Q-curve sweeps the feather tip
+  down to y=170, where the wing path meets the base bar top).
+  Where the wing curve extends below the band, the gold path
+  reappears — creating a small asymmetric notch at each wing's
+  outer edge.  The user explicitly endorsed this as a design
+  feature: "I like the error that the amber ribbon does not
+  align perfect the bottom line."  Do not "fix" this offset
+  by raising the band's lower edge, clipping the wing path
+  to a horizontal line, or otherwise forcing a flush boundary.
+  This asymmetry is load-bearing.
+
 - **Palette** — the design uses the Hermes Agent palette: gold
   `#ffc72c` primary fill; amber `#f9a23a` bottom band.  All
   renders use a transparent background (no navy, no other
@@ -136,14 +162,21 @@ background so it can be placed on any surface.
   primary lockup (transparent background).  Glyph is the
   `solid_3` winged-sandal: a single closed `<path>` per side
   that flows 3 feathers down into the base bar as one integral
-  piece.  Gold wings + amber bicolour ribbon overlay (clipPath)
-  cutting across the lower portion of the wings and the base
-  bar.  The ribbon aligns with the band on TALARIA; the base
-  bar bottom sits on the wordmark baseline.
+  piece.  Gold wings + thin amber ribbon overlay (clipPath) at
+  glyph-local y=150..180 (height = `GLYPH_BAND_HEIGHT = 30`
+  units).  The lockup ribbon and the wordmark band sit on the
+  same y line (lockup y=157..187); the lockup derives the band
+  from cap-derived math, the wordmark uses the same constants.
+  The intentional asymmetric notch at the wing's outer corner
+  (where the lower feather dips below the band's lower edge)
+  is a load-bearing design feature — see "Intentional 'error'"
+  in Local Contracts above.  The base bar bottom sits on the
+  wordmark baseline.
 - `logo-mark.svg` — square mark only (transparent background,
   SVG-only — no raster children).  Uses the same `solid_3`
-  winged-sandal glyph with the bottom-36% band rule (no
-  wordmark to anchor the strip).
+  winged-sandal glyph with the same `GLYPH_BAND_TOP_LOCAL` /
+  `GLYPH_BAND_HEIGHT` as the lockup ribbon.  Same intentional
+  outer-corner notch as the lockup.
 - `build_logo.py` — SVG source generator (single source of
   truth).  Generates `logo.svg` and `logo-mark.svg` from the
-  geometry constants.
+  geometry constants at the top of the file.
