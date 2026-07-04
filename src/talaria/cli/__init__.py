@@ -325,6 +325,92 @@ def cmd_hermes_serve_stop(args: argparse.Namespace) -> int:
     return exit_code
 
 
+# ---------- Subcommand: talaria hermes log-rotate ----------
+def _log_rotate_target_paths(args: argparse.Namespace) -> list[tuple[str, Path]]:
+    """Return ``[(profile, log_dir)]`` pairs to process.
+
+    With ``--all-profiles`` every ``$HERMES_ROOT/profiles/*/logs/``
+    plus the root ``$HERMES_ROOT/logs/`` is in scope; otherwise just
+    the active profile's logs/ (the same path that ``talaria paths``
+    reports).
+    """
+    paths = resolve_paths(profile_flag=args.profile)
+    if not args.all_profiles:
+        return [(paths.profile, paths.log_dir)]
+    from talaria.paths import DEFAULT_PROFILE_NAME, HERMES_ROOT
+
+    targets: list[tuple[str, Path]] = []
+    root = paths.hermes_root
+    root_logs = root / "logs"
+    if root_logs.is_dir():
+        targets.append((DEFAULT_PROFILE_NAME, root_logs))
+    profiles_dir = root / "profiles"
+    if profiles_dir.is_dir():
+        for child in sorted(profiles_dir.iterdir()):
+            if not child.is_dir():
+                continue
+            logs = child / "logs"
+            if logs.is_dir():
+                targets.append((child.name, logs))
+    return targets
+
+
+def cmd_hermes_log_rotate(args: argparse.Namespace) -> int:
+    from talaria.hermos import log_rotate as log_rotate_module
+
+    targets = _log_rotate_target_paths(args)
+    if args.show_resolution:
+        from talaria.paths import ResolvedPaths
+
+        all_actions: list[dict] = []
+        for profile, log_dir in targets:
+            paths = ResolvedPaths(
+                profile=profile,
+                hermes_root=log_dir.parent.parent,
+                state_db=log_dir.parent / "state.db",
+                log_dir=log_dir,
+            )
+            print(log_rotate_module.show_resolution(
+                paths,
+                log_dir=log_dir,
+                max_size=args.max_size,
+                max_age_days=args.max_age_days,
+                max_total=args.max_total,
+                keep=args.keep,
+            ))
+            all_actions.append({"profile": profile, "log_dir": str(log_dir)})
+        return 0
+
+    reports: list[dict] = []
+    for profile, log_dir in targets:
+        from talaria.paths import ResolvedPaths
+
+        paths = ResolvedPaths(
+            profile=profile,
+            hermes_root=log_dir.parent.parent,
+            state_db=log_dir.parent / "state.db",
+            log_dir=log_dir,
+        )
+        reports.append(log_rotate_module.run(
+            paths,
+            log_dir=log_dir,
+            max_size=args.max_size,
+            max_age_days=args.max_age_days,
+            max_total=args.max_total,
+            keep=args.keep,
+            apply=not args.dry_run,
+        ))
+
+    if args.json:
+        _print_json({"reports": reports})
+        return 0
+
+    for r in reports:
+        exit_code, text = log_rotate_module.render_human(r)
+        print(text)
+    return 0
+
+
 def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
     from talaria.hermos import auxiliary
 
@@ -577,10 +663,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop a running Hermes dashboard/serve backend by its port.",
         description=(
             "Detect and gracefully stop the Hermes dashboard/serve backend "
-            "listening on a TCP port (default 9119). Detects the process by "
-            "its listening socket via /proc, so it finds backends that "
-            "`hermes serve --stop` misses when launched with a global flag "
-            "between the module and subcommand (e.g. the Hermes Desktop "
+            "by the TCP port it is listening on (default 9119). Useful when "
+            "the desktop app launched the backend in a way that "
+            "hermes serve --stop cannot pattern-match (e.g. the desktop "
             "app's `-p default dashboard` launch)."
         ),
     )
@@ -603,6 +688,61 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the port and detected PID(s), then exit.",
     )
     p_serve_stop.set_defaults(func=cmd_hermes_serve_stop)
+
+    # talaria hermes log-rotate
+    p_log_rotate = hermes_sub.add_parser(
+        "log-rotate",
+        help="Rotate and prune Hermes log directories (age + size caps, gzip, dry-run).",
+        description=(
+            "Rotate and prune the active profile's logs/ directory. "
+            "Explicit-only: with no flags the tool reports sizes/ages and "
+            "exits without writing. --max-size rotates any active file "
+            "whose gzipped payload exceeds the cap (copy -> <name>.1.gz, "
+            "truncate source to 0). --max-age deletes rotated copies and "
+            "curator snapshots older than the threshold. --max-total bounds "
+            "the aggregate size of the directory by deleting the oldest "
+            "rotated copies first. --keep N protects the most recent N "
+            "rotated copies per base name. --all-profiles sweeps every "
+            "$HERMES_ROOT/profiles/*/logs/ plus the root logs/ in one run."
+        ),
+    )
+    p_log_rotate.add_argument(
+        "--profile", help="Hermes profile whose logs/ to operate on (default: active).",
+    )
+    p_log_rotate.add_argument(
+        "--all-profiles", action="store_true",
+        help="Sweep every profile's logs/ and the root logs/ in one run.",
+    )
+    p_log_rotate.add_argument(
+        "--max-size", type=int, default=None, metavar="BYTES",
+        help="Per-file size cap, applied to the gzipped payload. Active files "
+             "exceeding this are rotated (copy -> <name>.1.gz, truncate to 0).",
+    )
+    p_log_rotate.add_argument(
+        "--max-age", type=int, default=None, dest="max_age_days", metavar="DAYS",
+        help="Delete rotated copies and curator snapshots older than DAYS days.",
+    )
+    p_log_rotate.add_argument(
+        "--max-total", type=int, default=None, metavar="BYTES",
+        help="Cap the aggregate on-disk size of the directory; oldest "
+             "rotated copies are deleted first until the total drops below.",
+    )
+    p_log_rotate.add_argument(
+        "--keep", type=int, default=1, metavar="N",
+        help="Minimum number of rotated copies to preserve per base name (default: 1).",
+    )
+    p_log_rotate.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview actions without copying, gzipping, truncating, or deleting.",
+    )
+    p_log_rotate.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_log_rotate.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print resolved log dir, scanned size, and planned actions, then exit.",
+    )
+    p_log_rotate.set_defaults(func=cmd_hermes_log_rotate)
 
     # talaria skills ...
     p_skills = sub.add_parser(

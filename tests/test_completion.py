@@ -42,7 +42,7 @@ class TestCollect:
         names = {s.name for s in hermes.subcommands}
         assert names == {
             "moa-truncation", "refresh-catalog", "fix-context-cache",
-            "serve-stop",
+            "serve-stop", "log-rotate",
         }
 
     def test_config_group_has_three_commands(self) -> None:
