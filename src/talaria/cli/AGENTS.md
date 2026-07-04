@@ -43,7 +43,14 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   `shell` argument (choices: `bash`, `zsh`). The generated script is
   pure shell with no per-keystroke Python subprocess; users activate
   it via `eval "$(talaria completion bash)"` or `eval "$(talaria
-  completion zsh)"`.
+  completion zsh)"`. The zsh variant must use the `#compdef _funcname
+  <cmd>` directive (NOT the bare `#compdef <cmd>` autoload form)
+  and must NOT end with a `_talaria "$@"` call — both are required
+  so `eval "$(talaria completion zsh)"` in ~/.zshrc wires up
+  completion cleanly. A trailing call invokes `_arguments` outside
+  completion context when the script is sourced, raising
+  `_arguments:comparguments:… can only be called from completion
+  function`.
 
 ## Work Guidance
 

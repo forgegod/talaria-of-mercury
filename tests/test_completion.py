@@ -196,12 +196,20 @@ class TestZsh:
 
     def test_has_compdef_directive(self) -> None:
         script = self.render()
-        assert script.startswith("#compdef talaria")
+        # The `#compdef _funcname <cmd>` form (vs the bare `#compdef
+        # <cmd>` autoload form) registers the function as the completion
+        # for `talaria` when the script is sourced via `eval "$(…)"` in
+        # ~/.zshrc. The bare form only works for autoloaded files.
+        assert script.startswith("#compdef _talaria talaria")
 
     def test_defines_function(self) -> None:
         script = self.render()
         assert "_talaria()" in script
-        assert '_talaria "$@"' in script
+        # The script must NOT end with a `_talaria "$@"` call — invoking
+        # the function in non-completion context (which `eval` does)
+        # raises `_arguments:comparguments:… can only be called from
+        # completion function`.
+        assert not script.rstrip().endswith('_talaria "$@"')
 
     def test_contains_all_top_level_subcommands(self) -> None:
         script = self.render()
@@ -307,7 +315,7 @@ class TestCli:
     def test_zsh_outputs_script(self) -> None:
         result = self._cli("zsh")
         assert result.returncode == 0
-        assert result.stdout.startswith("#compdef talaria")
+        assert result.stdout.startswith("#compdef _talaria talaria")
 
     def test_invalid_shell_exits_2(self) -> None:
         result = self._cli("fish")
@@ -336,3 +344,27 @@ class TestCli:
             input=result.stdout, capture_output=True, text=True,
         )
         assert check.returncode == 0, check.stderr
+
+    def test_zsh_output_evals_silently_in_zshrc(self) -> None:
+        """Regression: `eval "$(talaria completion zsh)"` in ~/.zshrc
+        must not raise `_arguments:comparguments:… can only be called
+        from completion function`. The bug was the trailing
+        `_talaria "$@"` call which invoked `_arguments` outside a
+        completion context when the script was sourced.
+        """
+        zsh = Path("/usr/bin/zsh")
+        if not zsh.exists():
+            pytest.skip("zsh not installed")
+        result = self._cli("zsh")
+        # Simulate `eval "$(talaria completion zsh)"` in .zshrc: load
+        # compinit, then eval the script. Any stderr from `_arguments`
+        # is the regression.
+        check = subprocess.run(
+            [str(zsh), "-c",
+             'autoload -U compinit && compinit -u && eval "$1"',
+             "_", result.stdout],
+            capture_output=True, text=True,
+        )
+        assert check.returncode == 0, check.stderr
+        assert "can only be called from completion function" not in check.stderr
+        assert "_arguments" not in check.stderr
