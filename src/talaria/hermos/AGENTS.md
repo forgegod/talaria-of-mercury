@@ -26,7 +26,11 @@ caches.
 - `skill_install` is profile-scoped by design — it expands skill identifiers
   (recursive when they end in `/*`), invokes `hermes skills install` for each
   expanded child skill, and updates only that profile's `config.yaml` skill
-  enable/disable policy.
+  enable/disable policy. An optional `--category` forwards to
+  `hermes skills install --category` so skills land in
+  `skills/<category>/<name>/` instead of the flat root. The category value
+  is the literal directory name (e.g. `software-development`), not a display
+  name — Hermes' validation regex (`^[a-z][a-z0-9_/-]*$`) rejects uppercase.
 - `skill_uninstall` is profile-scoped by design — it mirrors `skill_install`:
   expand the identifier, invoke `hermes skills uninstall` for each child skill
   *name* (unlike install, uninstall takes a name, not an identifier), and
@@ -75,6 +79,15 @@ caches.
   value untouched (refresh) or skip the key (add). Writes go through
   the atomic backup writer. This supersedes the retired
   `~/.config/shell/sync-secrets.sh` shell helper.
+- `skill_category` is profile-scoped by design — it creates a category
+  directory under the profile's `skills/` tree and optionally writes a
+  `DESCRIPTION.md` whose frontmatter `description:` is rendered in the
+  Hermes system prompt after the category name. Category names are the
+  literal directory name (e.g. `software-development`, `mlops/training`),
+  validated against Hermes' regex `^[a-z][a-z0-9_/-]*$`. Creating a
+  category that already exists is a no-op on the directory; re-writing
+  its `DESCRIPTION.md` goes through the atomic backup writer with an
+  optional `.bak`. `--dry-run` must not create any directory or file.
 
 ## Local Contracts
 
@@ -97,6 +110,7 @@ caches.
 - `skill_install` reports use `ok: bool`; recursive installs are disabled by
   default via `skills.disabled` unless `--force-enable` or `--enable` says
   otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
+  Reports include `category` (the forwarded directory-name or empty string).
 - `skill_uninstall` reports use `ok: bool`; successfully uninstalled skill
   names are removed from `skills.disabled`. `--dry-run` must not invoke
   Hermes or write `config.yaml`. Partial failures still clean up the skills
@@ -136,6 +150,29 @@ caches.
   adds keys and the target file does not exist, the file is created
   with the added lines; when no key is addable and the file is missing,
   it stays a no-op.
+- `skill_category` reports use `ok: bool`, `created: bool`, and
+  `description_written: bool`. Writes go through the atomic backup
+  writer. `--dry-run` must not create a directory or write
+  `DESCRIPTION.md`. The category name must match Hermes' category regex
+  `^[a-z][a-z0-9_/-]*$`; invalid names raise `SkillCategoryError`.
+- `skill_install` reports include `name_collisions` — a dict mapping
+  colliding skill names to their competing identifiers. Hermes' lock.json
+  keys by skill name, so two identifiers with the same trailing component
+  (e.g. `cat-a/foo` and `cat-b/foo`) collide: the second install
+  overwrites the first's lock entry and orphans its directory. Talaria
+  detects this from the expanded identifier list and warns the operator
+  (verbose output + render_human + JSON report). It does not block the
+  install — Hermes handles the overwrite with `--force` or warns without it.
+- `skill_similarity` provides fuzzy comparison for collision assessment:
+  reads the installed skill's SKILL.md frontmatter from disk, fetches the
+  incoming skill's frontmatter from GitHub raw content, and compares
+  `name + description` via `difflib.SequenceMatcher` (stdlib, no deps).
+  Default threshold 0.65. `--replace-similar-skill` uninstalls similar
+  skills before installing the new one. `run()` reports
+  `similarity_assessments` (list of per-skill ratio/similar/error dicts)
+  and `replaced_skills` (list of uninstalled names). Similarity fetches
+  only happen when the skill name already exists in lock.json — no extra
+  network calls for non-colliding installs.
 
 ## Work Guidance
 
@@ -153,9 +190,15 @@ caches.
   installer into Talaria. Note: `hermes skills uninstall` takes a skill
   *name*, not an identifier — reduce each expanded identifier to its
   trailing component before delegation. `hermes skills uninstall` has no
-  `--yes` flag (unlike install) and prompts on stdin; the uninstaller must
+  `hermes skills uninstall` has no `--yes` flag (unlike install) and prompts on stdin; the uninstaller must
   feed confirmation non-interactively and detect Hermes' false-zero-rc
   failures via stdout markers (see `default_uninstaller`).
+  Both install and uninstall delegate to `hermes skills ...` subprocesses
+  and must set `HERMES_HOME` (not `HERMES_PROFILE`) so the child process
+  operates on the correct profile. Hermes resolves profiles exclusively
+  through `HERMES_HOME` pointing at the profile directory
+  (`~/.hermes/profiles/<name>`), never via a `HERMES_PROFILE` env var.
+  Use `skill_install.profile_hermes_home(paths)` to compute the value.
 
 ## Verification
 
@@ -170,10 +213,18 @@ caches.
   insertion, `--only-existing`, dry-run write suppression, and CLI profile
   resolution.
 - `skill_install` tests cover GitHub tree expansion, default-disabled policy,
-  selected enablement, force-enable, dry-run suppression, and CLI flags.
+  selected enablement, force-enable, dry-run suppression, CLI flags, and
+  `--category` forwarding (command construction, omission when empty,
+  run() propagation, report field, CLI `--help` presence).
 - `skill_uninstall` tests cover disabled-list cleanup, name-based (not
   identifier) delegation to `hermes skills uninstall`, dry-run suppression,
   partial-failure cleanup, profile-scoped config writes, and CLI flags.
+- `skill_category` tests cover name validation (accept/reject edge cases),
+  skills-dir resolution per profile, directory creation (with and without
+  description, nested categories, existing-dir no-op), DESCRIPTION.md
+  overwrite with backup, `--no-backup`, `--dry-run` suppression, named
+  profile path, invalid-name error, render_human output, show_resolution
+  shape, and CLI `--help`.
 - `auxiliary` tests cover alias injection, sentinel skipping, alias
   preservation, no-op cases, idempotency, dry-run suppression, profile
   path resolution, and CLI flags.
@@ -223,6 +274,14 @@ caches.
 - `skill_uninstall.py` — mirror of `skill_install`: expand identifiers,
   run per-skill Hermes uninstalls (by name), then remove uninstalled names
   from `skills.disabled`.
+- `skill_category.py` — create a skill category directory under the
+  profile's `skills/` tree with an optional `DESCRIPTION.md`. Surfaced as
+  `talaria skills create-category`.
+- `skill_similarity.py` — fuzzy comparison (difflib.SequenceMatcher) of
+  incoming vs installed skill frontmatter. Used by `skill_install` to
+  detect similar-but-not-identical collisions and power
+  `--replace-similar-skill`. Reads Hermes' lock.json + on-disk SKILL.md;
+  fetches incoming SKILL.md from GitHub raw.
 - `auxiliary.py` — derive `model.aliases._<usecase>` from a profile's own
   `auxiliary.<usecase>.model` block. Single-profile; surfaced as
   `talaria config apply-auxiliary`.

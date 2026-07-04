@@ -51,11 +51,11 @@ class TestCollect:
         names = {s.name for s in config.subcommands}
         assert names == {"sync", "apply-auxiliary", "sync-env"}
 
-    def test_skills_group_has_two_commands(self) -> None:
+    def test_skills_group_has_three_commands(self) -> None:
         root = completion.collect(build_parser())
         skills = next(s for s in root.subcommands if s.name == "skills")
         names = {s.name for s in skills.subcommands}
-        assert names == {"install", "uninstall"}
+        assert names == {"install", "uninstall", "create-category"}
 
     def test_leaf_subcommand_has_options(self) -> None:
         root = completion.collect(build_parser())

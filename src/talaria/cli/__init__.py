@@ -149,7 +149,7 @@ def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
 
     paths = resolve_paths(profile_flag=args.profile)
     if args.show_resolution:
-        print(skill_install.show_resolution(paths, identifier=args.identifier))
+        print(skill_install.show_resolution(paths, identifier=args.identifier, category=args.category))
         return 0
     report = skill_install.run(
         paths,
@@ -157,6 +157,8 @@ def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
         force=args.force,
         force_enable=args.force_enable,
         enable=list(args.enable or []),
+        category=args.category,
+        replace_similar=args.replace_similar_skill,
         apply=not args.dry_run,
         no_backup=args.no_backup,
         verbose=args.verbose,
@@ -169,7 +171,7 @@ def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
     return exit_code
 
 
-# ---------- Subcommand: talaria hermes skills uninstall ----------
+# ---------- Subcommand: talaria skills uninstall ----------
 def cmd_hermes_skills_uninstall(args: argparse.Namespace) -> int:
     from talaria.hermos import skill_uninstall
 
@@ -188,6 +190,31 @@ def cmd_hermes_skills_uninstall(args: argparse.Namespace) -> int:
         _print_json(report)
         return 0 if report["ok"] else 2
     exit_code, text = skill_uninstall.render_human(report)
+    print(text)
+    return exit_code
+
+
+# ---------- Subcommand: talaria skills create-category ----------
+def cmd_hermes_skills_create_category(args: argparse.Namespace) -> int:
+    from talaria.hermos import skill_category
+
+    paths = resolve_paths(profile_flag=args.profile)
+    if args.show_resolution:
+        print(skill_category.show_resolution(
+            paths, category=args.category, description=args.description or "",
+        ))
+        return 0
+    report = skill_category.create_category(
+        paths,
+        args.category,
+        description=args.description or "",
+        apply=not args.dry_run,
+        no_backup=args.no_backup,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    exit_code, text = skill_category.render_human(report)
     print(text)
     return exit_code
 
@@ -624,6 +651,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable only these installed skill names or identifiers; all other installed skills are disabled.",
     )
     p_skill_install.add_argument(
+        "--category", default="",
+        help="Category directory name forwarded to `hermes skills install --category`. "
+             "Installs each skill into skills/<category>/<name>/ instead of the flat root. "
+             "Must match Hermes' category regex: lowercase letters, digits, hyphens, "
+             "underscores, and slashes (e.g. software-development, mlops/training). "
+             "No display-name mapping — the value is the literal directory name.",
+    )
+    p_skill_install.add_argument(
+        "--replace-similar-skill", dest="replace_similar_skill", action="store_true",
+        help="When a skill name already exists and the frontmatter (name + description) "
+             "is >=65%% similar (difflib.SequenceMatcher), uninstall the existing skill "
+             "before installing the new one. Without this flag, similar skills are "
+             "reported as hints only.",
+    )
+    p_skill_install.add_argument(
         "--dry-run", action="store_true",
         help="Preview expansion and config policy without installing or writing config.yaml.",
     )
@@ -682,6 +724,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stream per-skill progress (expansion, each uninstall, config cleanup) to stderr.",
     )
     p_skill_uninstall.set_defaults(func=cmd_hermes_skills_uninstall)
+
+    # talaria skills create-category
+    p_skill_create_cat = skills_sub.add_parser(
+        "create-category",
+        help="Create a skill category directory with an optional description.",
+        description=(
+            "Create a category directory under the profile's skills/ tree so "
+            "skills can be installed into it with `talaria skills install "
+            "--category <name>`. Optionally writes a DESCRIPTION.md whose "
+            "frontmatter description is shown in the Hermes system prompt. "
+            "The category name is the literal directory name (e.g. "
+            "software-development, mlops/training) — lowercase letters, "
+            "digits, hyphens, underscores, and slashes."
+        ),
+    )
+    p_skill_create_cat.add_argument(
+        "category",
+        help="Category directory name (e.g. software-development, mlops/training).",
+    )
+    p_skill_create_cat.add_argument(
+        "--description", default="",
+        help="Human-readable description written to DESCRIPTION.md frontmatter. "
+             "Shown after the category name in the Hermes system prompt.",
+    )
+    p_skill_create_cat.add_argument(
+        "--profile", help="Hermes profile whose skills/ tree to create the category in.",
+    )
+    p_skill_create_cat.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview the resolved paths without creating anything.",
+    )
+    p_skill_create_cat.add_argument(
+        "--no-backup", action="store_true",
+        help="Skip .bak backup when overwriting an existing DESCRIPTION.md.",
+    )
+    p_skill_create_cat.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_skill_create_cat.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print the resolved category directory and validation result, then exit.",
+    )
+    p_skill_create_cat.set_defaults(func=cmd_hermes_skills_create_category)
 
     # talaria config ...
     config_grp = sub.add_parser(

@@ -141,7 +141,7 @@ class TestRun:
 
         def fake_run(cmd, text, capture_output, check, env):
             captured["cmd"] = cmd
-            captured["env_profile"] = env.get("HERMES_PROFILE")
+            captured["env_home"] = env.get("HERMES_HOME")
             return Proc()
 
         monkeypatch.setattr(skill_install.subprocess, "run", fake_run)
@@ -154,7 +154,7 @@ class TestRun:
 
         assert result.ok is True
         assert captured["cmd"] == ["hermes", "skills", "install", "skills-sh/x/y/a", "--yes", "--force"]
-        assert captured["env_profile"] == "vc-client"
+        assert captured["env_home"] == str(tmp_path / ".hermes" / "profiles" / "vc-client")
 
     def test_dry_run_does_not_call_installer_or_write_config(self, monkeypatch, tmp_path: Path) -> None:
         root = tmp_path / ".hermes"
@@ -195,8 +195,8 @@ class TestRun:
         )
         calls = []
 
-        def fake_installer(identifier, paths, force):
-            calls.append((identifier, paths.profile, force))
+        def fake_installer(identifier, paths, force, category=""):
+            calls.append((identifier, paths.profile, force, category))
             return skill_install.InstallResult(identifier, skill_install.skill_name_from_identifier(identifier), 0)
 
         report = skill_install.run(
@@ -209,10 +209,276 @@ class TestRun:
         )
 
         assert report["ok"] is True
-        assert calls == [("skills-sh/x/y/a", "vc-client", True), ("skills-sh/x/y/b", "vc-client", True)]
+        assert calls == [
+            ("skills-sh/x/y/a", "vc-client", True, ""),
+            ("skills-sh/x/y/b", "vc-client", True, ""),
+        ]
         assert report["enabled"] == ["a"]
         assert report["disabled"] == ["b"]
         assert load_yaml(profile_dir / "config.yaml")["skills"]["disabled"] == ["b"]
+
+
+class TestCategoryForwarding:
+    def test_default_installer_forwards_category_to_hermes(self, monkeypatch, tmp_path: Path) -> None:
+        captured = {}
+
+        class Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, text, capture_output, check, env):
+            captured["cmd"] = cmd
+            return Proc()
+
+        monkeypatch.setattr(skill_install.subprocess, "run", fake_run)
+
+        skill_install.default_installer(
+            "skills-sh/x/y/a",
+            _paths(tmp_path / ".hermes"),
+            force=False,
+            category="software-development",
+        )
+
+        assert captured["cmd"] == [
+            "hermes", "skills", "install", "skills-sh/x/y/a", "--yes",
+            "--category", "software-development",
+        ]
+
+    def test_default_installer_omits_category_when_empty(self, monkeypatch, tmp_path: Path) -> None:
+        captured = {}
+
+        class Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(cmd, text, capture_output, check, env):
+            captured["cmd"] = cmd
+            return Proc()
+
+        monkeypatch.setattr(skill_install.subprocess, "run", fake_run)
+
+        skill_install.default_installer(
+            "skills-sh/x/y/a",
+            _paths(tmp_path / ".hermes"),
+            force=False,
+            category="",
+        )
+
+        assert "--category" not in captured["cmd"]
+
+    def test_run_forwards_category_to_installer(self, monkeypatch, tmp_path: Path) -> None:
+        root = tmp_path / ".hermes"
+        root.mkdir()
+        (root / "config.yaml").write_text(dump_yaml({"skills": {"disabled": []}}))
+        monkeypatch.setattr(
+            skill_install,
+            "expand_recursive_identifier",
+            lambda ident: ["skills-sh/x/y/a"],
+        )
+        calls = []
+
+        def fake_installer(identifier, paths, force, category=""):
+            calls.append(category)
+            return skill_install.InstallResult(identifier, "a", 0)
+
+        report = skill_install.run(
+            _paths(root),
+            identifier="skills-sh/x/y/*",
+            category="mlops/training",
+            no_backup=True,
+            installer=fake_installer,
+        )
+
+        assert report["ok"] is True
+        assert report["category"] == "mlops/training"
+        assert calls == ["mlops/training"]
+
+
+class TestNameCollisions:
+    def test_no_collisions_returns_empty(self) -> None:
+        idents = ["skills-sh/x/y/a", "skills-sh/x/y/b"]
+        assert skill_install._detect_name_collisions(idents) == {}
+
+    def test_detects_same_trailing_component(self) -> None:
+        idents = [
+            "skills-sh/x/cat-a/foo",
+            "skills-sh/x/cat-b/foo",
+        ]
+        result = skill_install._detect_name_collisions(idents)
+        assert "foo" in result
+        assert result["foo"] == idents
+
+    def test_run_includes_collisions_in_report(self, monkeypatch, tmp_path: Path) -> None:
+        root = tmp_path / ".hermes"
+        root.mkdir()
+        (root / "config.yaml").write_text(dump_yaml({"skills": {"disabled": []}}))
+        monkeypatch.setattr(
+            skill_install,
+            "expand_recursive_identifier",
+            lambda ident: ["skills-sh/x/cat-a/foo", "skills-sh/x/cat-b/foo"],
+        )
+
+        def fake_installer(identifier, paths, force, category=""):
+            return skill_install.InstallResult(identifier, skill_install.skill_name_from_identifier(identifier), 0)
+
+        report = skill_install.run(
+            _paths(root),
+            identifier="skills-sh/x/*",
+            no_backup=True,
+            installer=fake_installer,
+        )
+
+        assert report["ok"] is True
+        assert "foo" in report["name_collisions"]
+
+    def test_render_human_shows_collision_warning(self) -> None:
+        report = {
+            "ok": True,
+            "profile": "default",
+            "identifier": "skills-sh/x/*",
+            "category": "",
+            "expanded": ["skills-sh/x/cat-a/foo", "skills-sh/x/cat-b/foo"],
+            "installed": [],
+            "enabled": [],
+            "disabled": [],
+            "name_collisions": {"foo": ["skills-sh/x/cat-a/foo", "skills-sh/x/cat-b/foo"]},
+            "config_path": "/tmp/config.yaml",
+            "backup_path": None,
+            "error": None,
+            "dry_run": False,
+        }
+        code, text = skill_install.render_human(report)
+        assert code == 0
+        assert "name collisions" in text
+        assert "foo" in text
+
+    def test_replace_similar_uninstalls_before_install(self, monkeypatch, tmp_path: Path) -> None:
+        root = tmp_path / ".hermes"
+        root.mkdir()
+        (root / "config.yaml").write_text(dump_yaml({"skills": {"disabled": []}}))
+        # Set up a fake installed skill in lock.json
+        sdir = root / "skills"
+        skill_dir = sdir / "research" / "arxiv"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: arxiv\ndescription: \"Search arXiv papers by keyword\"\n---\n"
+        )
+        hub = sdir / ".hub"
+        hub.mkdir()
+        (hub / "lock.json").write_text(json.dumps({
+            "version": 1,
+            "installed": {
+                "arxiv": {
+                    "source": "github",
+                    "identifier": "old/arxiv",
+                    "install_path": "research/arxiv",
+                    "content_hash": "sha256:abc",
+                }
+            }
+        }))
+
+        monkeypatch.setattr(
+            skill_install,
+            "expand_recursive_identifier",
+            lambda ident: ["new/arxiv"],
+        )
+        # Mock fetch_incoming to return a similar frontmatter (avoids network)
+        from talaria.hermos import skill_similarity
+        monkeypatch.setattr(
+            skill_similarity,
+            "fetch_incoming_frontmatter",
+            lambda ident: skill_similarity.SkillFrontmatter(
+                "arxiv", "Search arXiv papers by author", ident,
+            ),
+        )
+        from talaria.hermos import skill_uninstall
+
+        uninstall_calls = []
+        install_calls = []
+
+        def fake_uninstaller(identifier, paths):
+            name = skill_install.skill_name_from_identifier(identifier)
+            uninstall_calls.append(name)
+            return skill_uninstall.UninstallResult(identifier, name, 0)
+
+        def fake_installer(identifier, paths, force, category=""):
+            install_calls.append(identifier)
+            return skill_install.InstallResult(identifier, "arxiv", 0)
+
+        report = skill_install.run(
+            _paths(root),
+            identifier="new/arxiv",
+            replace_similar=True,
+            no_backup=True,
+            installer=fake_installer,
+            uninstaller=fake_uninstaller,
+        )
+
+        assert report["ok"] is True
+        assert len(uninstall_calls) == 1
+        assert len(install_calls) == 1
+        assert len(report["replaced_skills"]) == 1
+        assert report["replaced_skills"][0]["name"] == "arxiv"
+
+    def test_similar_without_replace_gives_hint_only(self, monkeypatch, tmp_path: Path) -> None:
+        root = tmp_path / ".hermes"
+        root.mkdir()
+        (root / "config.yaml").write_text(dump_yaml({"skills": {"disabled": []}}))
+        sdir = root / "skills"
+        skill_dir = sdir / "research" / "arxiv"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: arxiv\ndescription: \"Search arXiv papers by keyword\"\n---\n"
+        )
+        hub = sdir / ".hub"
+        hub.mkdir()
+        (hub / "lock.json").write_text(json.dumps({
+            "version": 1,
+            "installed": {
+                "arxiv": {
+                    "source": "github",
+                    "identifier": "old/arxiv",
+                    "install_path": "research/arxiv",
+                    "content_hash": "sha256:abc",
+                }
+            }
+        }))
+
+        monkeypatch.setattr(
+            skill_install,
+            "expand_recursive_identifier",
+            lambda ident: ["new/arxiv"],
+        )
+        # Mock fetch_incoming to return a similar frontmatter (avoids network)
+        from talaria.hermos import skill_similarity as _ss
+        monkeypatch.setattr(
+            _ss,
+            "fetch_incoming_frontmatter",
+            lambda ident: _ss.SkillFrontmatter(
+                "arxiv", "Search arXiv papers by author", ident,
+            ),
+        )
+
+        uninstall_called = []
+        def fake_uninstaller(identifier, paths):
+            uninstall_called.append(identifier)
+            return skill_install.InstallResult(identifier, "arxiv", 0)
+
+        report = skill_install.run(
+            _paths(root),
+            identifier="new/arxiv",
+            replace_similar=False,  # hint only
+            no_backup=True,
+            installer=lambda ident, p, f, c="": skill_install.InstallResult(ident, "arxiv", 0),
+            uninstaller=fake_uninstaller,
+        )
+
+        assert report["ok"] is True
+        assert len(uninstall_called) == 0  # not uninstalled
+        assert len(report["replaced_skills"]) == 0
+        assert len(report["similarity_assessments"]) == 1
 
 
 class TestCli:
@@ -228,3 +494,4 @@ class TestCli:
         assert proc.returncode == 0
         assert "--force-enable" in proc.stdout
         assert "--enable" in proc.stdout
+        assert "--category" in proc.stdout

@@ -72,7 +72,7 @@ class TestRun:
 
         def fake_run(cmd, text, capture_output, check, env, input=None):
             captured["cmd"] = cmd
-            captured["env_profile"] = env.get("HERMES_PROFILE")
+            captured["env_home"] = env.get("HERMES_HOME")
             captured["input"] = input
             return Proc()
 
@@ -86,7 +86,7 @@ class TestRun:
         assert result.ok is True
         # uninstall takes a NAME, not an identifier
         assert captured["cmd"] == ["hermes", "skills", "uninstall", "a"]
-        assert captured["env_profile"] == "vc-client"
+        assert captured["env_home"] == str(tmp_path / ".hermes" / "profiles" / "vc-client")
         # confirmation is fed non-interactively
         assert captured["input"] == "y"
 

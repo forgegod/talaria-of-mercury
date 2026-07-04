@@ -58,7 +58,7 @@ def default_uninstaller(identifier: str, paths: ResolvedPaths) -> UninstallResul
     name = skill_install.skill_name_from_identifier(identifier)
     cmd = ["hermes", "skills", "uninstall", name]
     env = os.environ.copy()
-    env["HERMES_PROFILE"] = paths.profile
+    env["HERMES_HOME"] = skill_install.profile_hermes_home(paths)
     proc = subprocess.run(
         cmd, text=True, capture_output=True, check=False, env=env, input="y",
     )
