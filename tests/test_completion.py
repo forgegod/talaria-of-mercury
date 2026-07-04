@@ -26,23 +26,23 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # ---------- TestCollect ----------
 
 class TestCollect:
-    def test_root_has_three_top_level_subcommands(self) -> None:
+    def test_root_has_four_top_level_subcommands(self) -> None:
         root = completion.collect(build_parser())
         names = sorted(s.name for s in root.subcommands)
-        assert names == ["completion", "config", "hermes", "paths"]
+        assert names == ["completion", "config", "hermes", "paths", "skills"]
 
     def test_collect_is_idempotent(self) -> None:
         root1 = completion.collect(build_parser())
         root2 = completion.collect(build_parser())
         assert len(root1.subcommands) == len(root2.subcommands)
 
-    def test_hermes_group_has_five_features(self) -> None:
+    def test_hermes_group_has_four_features(self) -> None:
         root = completion.collect(build_parser())
         hermes = next(s for s in root.subcommands if s.name == "hermes")
         names = {s.name for s in hermes.subcommands}
         assert names == {
             "moa-truncation", "refresh-catalog", "fix-context-cache",
-            "install-skills-recursive", "serve-stop",
+            "serve-stop",
         }
 
     def test_config_group_has_three_commands(self) -> None:
@@ -50,6 +50,12 @@ class TestCollect:
         config = next(s for s in root.subcommands if s.name == "config")
         names = {s.name for s in config.subcommands}
         assert names == {"sync", "apply-auxiliary", "sync-env"}
+
+    def test_skills_group_has_two_commands(self) -> None:
+        root = completion.collect(build_parser())
+        skills = next(s for s in root.subcommands if s.name == "skills")
+        names = {s.name for s in skills.subcommands}
+        assert names == {"install", "uninstall"}
 
     def test_leaf_subcommand_has_options(self) -> None:
         root = completion.collect(build_parser())

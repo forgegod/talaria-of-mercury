@@ -254,12 +254,25 @@ def run(
     enable: list[str] | None = None,
     apply: bool = True,
     no_backup: bool = False,
+    verbose: bool = False,
+    out: Any = None,
     installer: Installer = default_installer,
 ) -> dict[str, Any]:
     """Expand, install, and apply the recursive-install enable policy."""
+    import sys
+
+    out = sys.stderr if out is None else out
+
+    def _say(msg: str) -> None:
+        if verbose:
+            out.write(msg.rstrip("\n") + "\n")
+            out.flush()
+
     try:
+        _say(f"expanding identifier {identifier!r} ...")
         identifiers = expand_recursive_identifier(identifier)
     except SkillInstallError as exc:
+        _say(f"  expansion failed: {exc}")
         return {
             "ok": False,
             "reason": exc.kind,
@@ -274,10 +287,15 @@ def run(
             "dry_run": not apply,
         }
 
+    _say(f"  found {len(identifiers)} skill(s): {', '.join(identifiers)}")
+
     installed: list[InstallResult] = []
     if apply:
         for skill_id in identifiers:
+            _say(f"install {skill_id} ...")
             installed.append(installer(skill_id, paths, force))
+            last = installed[-1]
+            _say(f"  -> rc={last.returncode} name={last.name}")
     else:
         installed = [InstallResult(skill_id, skill_name_from_identifier(skill_id), 0) for skill_id in identifiers]
 
@@ -285,6 +303,7 @@ def run(
     failed = [r for r in installed if not r.ok]
     policy = {"enabled": [], "disabled": [], "config_path": str(profile_config_path(paths)), "backup_path": None}
     if ok_installed:
+        _say(f"updating skills.disabled in {profile_config_path(paths)} ...")
         try:
             policy = apply_disabled_policy(
                 profile_config_path(paths),
@@ -294,7 +313,9 @@ def run(
                 apply=apply,
                 no_backup=no_backup,
             )
+            _say(f"  enabled={policy.get('enabled')} disabled={policy.get('disabled')}")
         except SkillInstallError as exc:
+            _say(f"  config write failed: {exc}")
             return {
                 "ok": False,
                 "reason": exc.kind,

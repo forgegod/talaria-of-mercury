@@ -218,7 +218,7 @@ class TestRun:
 class TestCli:
     def test_help_exposes_enable_flags_and_typo_alias(self) -> None:
         proc = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "install-skills-recursive", "--help"],
+            [sys.executable, "-m", "talaria.cli", "skills", "install", "--help"],
             cwd=REPO_ROOT,
             text=True,
             capture_output=True,

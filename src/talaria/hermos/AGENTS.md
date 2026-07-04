@@ -23,9 +23,23 @@ caches.
   `model.aliases._<usecase>` entries from the selected profile's own
   `auxiliary.<usecase>.model` block and writes them back into the same
   profile's `config.yaml`. No source/target split.
-- `skill_install` is profile-scoped by design — it expands recursive skill
-  identifiers, invokes `hermes skills install` for each child skill, and
-  updates only that profile's `config.yaml` skill enable/disable policy.
+- `skill_install` is profile-scoped by design — it expands skill identifiers
+  (recursive when they end in `/*`), invokes `hermes skills install` for each
+  expanded child skill, and updates only that profile's `config.yaml` skill
+  enable/disable policy.
+- `skill_uninstall` is profile-scoped by design — it mirrors `skill_install`:
+  expand the identifier, invoke `hermes skills uninstall` for each child skill
+  *name* (unlike install, uninstall takes a name, not an identifier), and
+  remove the uninstalled names from the profile's `skills.disabled` list so the
+  policy state does not reference skills that are no longer present.
+  `hermes skills uninstall` has no `--yes` flag and prompts for confirmation
+  on stdin; `default_uninstaller` feeds `input="y"` to make the call
+  non-interactive. Hermes also exits 0 on several non-success conditions
+  (prompt cancelled, skill not installed, skill is a builtin), so
+  `default_uninstaller` detects failure markers (`Cancelled`, `Error:`,
+  `not found`, `not a hub-installed`) in stdout and converts them to a
+  non-zero return code. This detection MUST be preserved — without it
+  Talaria falsely reports success for skills that were never removed.
 - `serve_stop` is profile-agnostic by design — it detects the Hermes
   dashboard/serve backend by its listening TCP port via
   `psutil.net_connections` → PID, then SIGTERM/poll/SIGKILL. psutil
@@ -83,6 +97,10 @@ caches.
 - `skill_install` reports use `ok: bool`; recursive installs are disabled by
   default via `skills.disabled` unless `--force-enable` or `--enable` says
   otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
+- `skill_uninstall` reports use `ok: bool`; successfully uninstalled skill
+  names are removed from `skills.disabled`. `--dry-run` must not invoke
+  Hermes or write `config.yaml`. Partial failures still clean up the skills
+  that uninstalled successfully; `ok` is False when any uninstall fails.
 - `auxiliary` reports use `ok: bool` and `changed: bool`. Writes go
   through the same atomic backup writer used by sync and
   `context_cache_fix`. `--dry-run` must not write a `config.yaml` or
@@ -130,8 +148,14 @@ caches.
   does the fetch + reshape + write path inside the Python CLI.
 - `context_cache_fix.KNOWN_CONTEXT_FIXES` must stay small and source-backed;
   do not add speculative model windows.
-- Skill installation must delegate actual install semantics to `hermes skills
-  install`; do not vendor or copy Hermes' hub installer into Talaria.
+- Skill install/uninstall must delegate actual semantics to `hermes skills
+  install` / `hermes skills uninstall`; do not vendor or copy Hermes' hub
+  installer into Talaria. Note: `hermes skills uninstall` takes a skill
+  *name*, not an identifier — reduce each expanded identifier to its
+  trailing component before delegation. `hermes skills uninstall` has no
+  `--yes` flag (unlike install) and prompts on stdin; the uninstaller must
+  feed confirmation non-interactively and detect Hermes' false-zero-rc
+  failures via stdout markers (see `default_uninstaller`).
 
 ## Verification
 
@@ -147,6 +171,9 @@ caches.
   resolution.
 - `skill_install` tests cover GitHub tree expansion, default-disabled policy,
   selected enablement, force-enable, dry-run suppression, and CLI flags.
+- `skill_uninstall` tests cover disabled-list cleanup, name-based (not
+  identifier) delegation to `hermes skills uninstall`, dry-run suppression,
+  partial-failure cleanup, profile-scoped config writes, and CLI flags.
 - `auxiliary` tests cover alias injection, sentinel skipping, alias
   preservation, no-op cases, idempotency, dry-run suppression, profile
   path resolution, and CLI flags.
@@ -190,8 +217,12 @@ caches.
   the matching Hermes provider manifest cache. Profile-agnostic.
 - `context_cache_fix.py` — repair curated known-bad entries in a profile's
   `context_length_cache.yaml` with atomic writes and backups.
-- `skill_install.py` — expand recursive skill identifiers and run per-skill
-  Hermes installs, then update `skills.disabled` in profile config.
+- `skill_install.py` — expand skill identifiers (recursive when ending in
+  `/*`) and run per-skill Hermes installs, then update `skills.disabled`
+  in profile config.
+- `skill_uninstall.py` — mirror of `skill_install`: expand identifiers,
+  run per-skill Hermes uninstalls (by name), then remove uninstalled names
+  from `skills.disabled`.
 - `auxiliary.py` — derive `model.aliases._<usecase>` from a profile's own
   `auxiliary.<usecase>.model` block. Single-profile; surfaced as
   `talaria config apply-auxiliary`.

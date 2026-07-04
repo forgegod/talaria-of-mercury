@@ -25,9 +25,9 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   live environment and can optionally extend the variable scope
   (`--add-key`, `--skip-key`, `--disable-key`, `--enable-key`),
   `talaria hermes fix-context-cache` repairs `context_length_cache.yaml`
-  in one profile, and `talaria hermes install-skills-recursive` installs
-  third-party skills then updates that profile's `skills.disabled` policy.
-  None touches `state.db` or rotates logs.
+  in one profile, and `talaria skills install` / `talaria skills uninstall`
+  install or remove third-party skills then update that profile's
+  `skills.disabled` policy. None touches `state.db` or rotates logs.
 - Every CLI subcommand must accept `--json` and a human-readable default renderer.
 
 ## Work Guidance
@@ -54,7 +54,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
 - `hermos/` — Hermes features: inspections, catalog refresh, explicit
-  context-cache repair, recursive skill install orchestration, and
+  context-cache repair, skill install/uninstall orchestration, and
   single-profile auxiliary-alias derivation (`talaria config apply-auxiliary`).
 - `sync/` — Hermes sync feature group (the write-bearing group behind
   `talaria config sync`; copies profile artefacts between profiles).

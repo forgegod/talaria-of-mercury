@@ -15,7 +15,7 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 - **Profile-aware path resolution** — explicit flags win, then `$HERMES_PROFILE`, then `~/.hermes/active_profile`, then `default`.
 - **Structured JSON output** for cron, dashboards, and other agents.
 - **Reusable feature layout** — adding a new maintenance check is a new module under `talaria.hermos` or a sync phase under `talaria.sync`, not a top-level script.
-- **Zero network dependencies for inspection features.** Read-only features (e.g. `moa-truncation`) never talk to the network. Network-aware maintenance commands (`refresh-catalog`, `install-skills-recursive`) fetch external catalog or skill metadata before writing profile artefacts.
+- **Zero network dependencies for inspection features.** Read-only features (e.g. `moa-truncation`) never talk to the network. Network-aware maintenance commands (`refresh-catalog`, `skills install`) fetch external catalog or skill metadata before writing profile artefacts.
 - **Write-bearing `talaria config`.** The inspection features never modify `state.db` or logs; the `config` command group is the deliberate carve-out that copies profile *configuration* artefacts (config.yaml, SOUL.md, skills/, .env, context cache) between profiles and derives `model.aliases` from a profile's `auxiliary` block.
 
 ## Features at a glance
@@ -25,7 +25,8 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 | `talaria paths`                  | —                                    | Print the resolved profile + paths Talaria would inspect.    |
 | `talaria hermes moa-truncation`  | `state.db`, `agent.log`, `errors.log`| Verify the MoA truncation mitigation (Signal A + Signal B).   |
 | `talaria hermes refresh-catalog` | selected gateway + XDG cache         | Refresh and reshape a gateway-backed model manifest.         |
-| `talaria hermes install-skills-recursive` | GitHub tree + profile config | Install every child skill under `.../*` and set enable policy. |
+| `talaria skills install`         | GitHub tree + profile config         | Install skill(s) under an identifier (recursive if `/*`) and set enable policy. |
+| `talaria skills uninstall`       | GitHub tree + profile config         | Uninstall skill(s) under an identifier and clean up `skills.disabled`. |
 | `talaria config sync`             | two profiles (or file paths)         | Copy config.yaml, SOUL.md, skills/, .env, context cache between profiles. |
 | `talaria config apply-auxiliary`  | one profile config.yaml              | Derive `model.aliases._<usecase>` from the profile's `auxiliary` block. |
 
@@ -98,11 +99,14 @@ talaria hermes refresh-catalog --gateway kilocode
 talaria hermes refresh-catalog --force --json
 
 # Install every child skill below a skills.sh repo path; disabled by default
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*'
+talaria skills install 'skills-sh/addyosmani/agent-skills/*'
 
 # Enable only selected recursively installed skills
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' \
+talaria skills install 'skills-sh/addyosmani/agent-skills/*' \
   --enable api-and-interface-design context-engineering
+
+# Uninstall every child skill below a skills.sh repo path
+talaria skills uninstall 'skills-sh/addyosmani/agent-skills/*'
 
 # Show what either feature would inspect without running it
 talaria hermes moa-truncation --show-resolution
@@ -260,32 +264,37 @@ By default the feature skips the fetch when the cache is younger than `--max-age
 
 The selected gateway's API key is read from its configured environment variable first, then from `~/.hermes/.env`. For `--gateway kilocode`, use `KILOCODE_API_KEY=...` or `export KILOCODE_API_KEY=...`. Missing credential is reported as `reason: "auth"` with exit code `2`.
 
-## Feature: `talaria hermes install-skills-recursive`
+## Feature: `talaria skills install`
 
-Installs every Hermes skill below a wildcard GitHub-backed skill identifier. This is a Talaria wrapper around the Hermes CLI: Talaria expands `.../*`, invokes `hermes skills install` once per child skill, then updates the selected profile's `config.yaml` so recursive third-party installs are disabled by default.
+Installs Hermes skills below a skill identifier. When the identifier ends in `/*`, Talaria expands it into its child skills (scanning the GitHub repository tree for `SKILL.md` files), invokes `hermes skills install` once per child skill, then updates the selected profile's `config.yaml` so third-party recursive installs are disabled by default. A non-wildcard identifier installs a single skill.
+
+This is a Talaria wrapper around the Hermes CLI: Talaria owns the expansion and `skills.disabled` policy; Hermes owns the actual install.
 
 ### Usage
 
 ```bash
 # Install all child skills and disable them by default
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*'
+talaria skills install 'skills-sh/addyosmani/agent-skills/*'
+
+# Install a single skill (no wildcard — no expansion, no policy write)
+talaria skills install 'skills-sh/addyosmani/agent-skills/api-and-interface-design'
 
 # Enable all installed child skills immediately
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' --force-enable
+talaria skills install 'skills-sh/addyosmani/agent-skills/*' --force-enable
 
 # Enable only selected skills; all other installed children stay disabled
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' \
+talaria skills install 'skills-sh/addyosmani/agent-skills/*' \
   --enable api-and-interface-design context-engineering
 
 # Preview expansion and config policy without installing or writing config.yaml
-talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
+talaria skills install 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
 ```
 
 ### Flags
 
 | Flag              | Default | Effect                                                                 |
 |-------------------|---------|------------------------------------------------------------------------|
-| `identifier`      | —       | Recursive identifier ending in `/*`, e.g. `skills-sh/owner/repo/path/*`. |
+| `identifier`      | —       | Skill identifier; a trailing `/*` installs every child skill.          |
 | `--profile`       | active  | Hermes profile to install into and whose `config.yaml` is updated.     |
 | `--force`         | off     | Pass `--force` to each `hermes skills install` invocation.             |
 | `--force-enable`  | off     | Enable every successfully installed child skill.                       |
@@ -309,6 +318,43 @@ After installation, Talaria writes `skills.disabled` in the selected profile con
 |------|----------------------------------------------|
 | `0`  | Expansion, installs, and config policy passed. |
 | `2`  | Tool error — expansion, install, or write failed. |
+
+## Feature: `talaria skills uninstall`
+
+Removes Hermes skills installed below a skill identifier. Mirrors `skills install`: expands the identifier (recursive when it ends in `/*`), invokes `hermes skills uninstall` for each child skill *name* (unlike install, uninstall takes a name, not an identifier), then removes the uninstalled names from `skills.disabled` so the disabled list does not reference skills that are no longer present.
+
+### Usage
+
+```bash
+# Uninstall all child skills below a skills.sh repo path
+talaria skills uninstall 'skills-sh/addyosmani/agent-skills/*'
+
+# Uninstall a single skill (no wildcard)
+talaria skills uninstall 'skills-sh/addyosmani/agent-skills/api-and-interface-design'
+
+# Preview expansion and config cleanup without uninstalling or writing config.yaml
+talaria skills uninstall 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
+```
+
+### Flags
+
+| Flag              | Default | Effect                                                          |
+|-------------------|---------|-----------------------------------------------------------------|
+| `identifier`      | —       | Skill identifier; a trailing `/*` uninstalls every child skill. |
+| `--profile`       | active  | Hermes profile to uninstall from and whose `config.yaml` is updated. |
+| `--dry-run`       | off     | Expand and report cleanup without invoking Hermes or writing config. |
+| `--no-backup`     | off     | Skip `.bak` backup before updating `config.yaml`.               |
+| `--json`          | off     | Emit the structured report.                                     |
+| `--show-resolution` | off   | Print expanded identifiers and target config path, then exit.  |
+
+### Exit codes
+
+| Code | Meaning                                          |
+|------|--------------------------------------------------|
+| `0`  | Expansion, uninstalls, and config cleanup passed.  |
+| `2`  | Tool error — expansion, uninstall, or write failed. |
+
+Partial failures: if some uninstalls fail, the successfully uninstalled skills are still cleaned up from `skills.disabled`, but the command exits `2`.
 
 ## Feature: `talaria config sync`
 
@@ -568,10 +614,11 @@ MIT — see `LICENSE`.
 
 - [Talaria — Wikipedia](https://en.wikipedia.org/wiki/Talaria) — mythology behind the name.
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — the agent this CLI maintains.
-- [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com) — the visual reference for the logo's puristic flat-mark style.
+- [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com) — the visual reference for the logo's bicolour gold/amber style and navy background.
+
 ## Brand assets
 
-- `assets/logo.svg` + `logo-256.png`, `logo-512.png`, `logo-1024.png` — primary lock-up.
+- `assets/logo.svg` + `logo-256.png`, `logo-512.png`, `logo-1024.png` — primary lock-up (navy background, gold + amber bicolour).
 - `assets/logo-mark.svg` + `logo-mark-128.png`, `logo-mark-256.png` — square mark only.
-- `assets/logo-inverse.svg` — white-on-transparent for dark backgrounds.
-- `assets/build_logo.py` — regenerates the SVG sources from the `ASCII_GLYPH` constant (single source of truth; edit the ASCII to redesign the silhouette).
+- `assets/logo-inverse.svg` — transparent background, for use on light surfaces.
+- `assets/build_logo.py` — regenerates the SVG sources from the geometry constants (single source of truth; edit the path functions to redesign the silhouette).
