@@ -329,6 +329,26 @@ def cmd_config_sync_env(args: argparse.Namespace) -> int:
     return exit_code
 
 
+# ---------- Subcommand: talaria completion ----------
+def cmd_completion(args: argparse.Namespace) -> int:
+    """Emit a shell completion script (bash or zsh).
+
+    Usage::
+
+        eval "$(talaria completion zsh)"
+        eval "$(talaria completion bash)"
+    """
+    from talaria.cli import completion
+
+    try:
+        script = completion.render(build_parser(), args.shell)
+    except completion.CompletionError as e:
+        print_error(str(e))
+        return 2
+    sys.stdout.write(script)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="talaria",
@@ -354,6 +374,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_paths.add_argument("--log-dir", type=Path, help="Explicit logs/ directory override.")
     p_paths.add_argument("--json", action="store_true", help="Emit JSON.")
     p_paths.set_defaults(func=cmd_paths)
+
+    # talaria completion
+    from talaria.cli import completion as _completion_module
+    p_completion = sub.add_parser(
+        "completion",
+        help="Print a shell completion script (bash or zsh).",
+        description=(
+            "Emit a self-contained shell completion script for the talaria "
+            "CLI. Source it with `eval \"$(talaria completion bash)\" (bash) "
+            "or `eval \"$(talaria completion zsh)\"` (zsh)."
+        ),
+    )
+    p_completion.add_argument(
+        "shell",
+        choices=list(_completion_module.SHELLS),
+        help="Target shell: bash or zsh.",
+    )
+    p_completion.set_defaults(func=cmd_completion)
 
     # talaria hermes ...
     hermes = sub.add_parser(

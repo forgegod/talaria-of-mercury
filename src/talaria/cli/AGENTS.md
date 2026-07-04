@@ -37,6 +37,13 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   environment, `--skip-key` excludes a key from the refresh,
   `--disable-key` comments a key out, and `--enable-key` uncomments
   a previously disabled key.
+- `talaria completion <shell>` is a top-level command (sibling to
+  `paths`, `hermes`, `config`) that prints a self-contained bash or
+  zsh completion script to stdout. It takes a single positional
+  `shell` argument (choices: `bash`, `zsh`). The generated script is
+  pure shell with no per-keystroke Python subprocess; users activate
+  it via `eval "$(talaria completion bash)"` or `eval "$(talaria
+  completion zsh)"`.
 
 ## Work Guidance
 
@@ -59,6 +66,15 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   by its listening port (profile-agnostic, Linux-only). It takes `--port`,
   `--dry-run`, `--json`, and `--show-resolution`. `--profile` is recorded in
   the report only and does not affect detection.
+- `talaria completion` delegates to `talaria.cli.completion`, which walks the
+  live `build_parser()` tree at invocation time and emits a static bash/zsh
+  script. Architectural note: completion is coupled to the CLI parameter
+  surface — any change to subcommand names, option flags, or argument
+  arity (e.g. adding `--json` to a new feature, changing `nargs`, or adding
+  a new subparser group) also changes the completion output. The coupling is
+  satisfied by construction because `collect()` introspects the parser tree
+  rather than maintaining a separate spec, but the contract must hold: if
+  `build_parser()` exposes a flag, `talaria completion` must surface it.
 
 ## Verification
 

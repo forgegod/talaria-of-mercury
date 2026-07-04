@@ -55,5 +55,8 @@ Pytest suite for the Talaria CLI and library.
 - `test_sync.py` — sync phases (config, soul, skills, env,
   context_cache), dot-path helpers, profile resolution, run_sync
   orchestration, CLI surface.
+- `test_completion.py` — bash/zsh completion script generation: parser-tree
+  introspection, script structure, syntax validation (`bash -n` / `zsh -n`),
+  functional bash completion via sourced script, and CLI subprocess.
 - `_helpers.py` — `make_sessions_db(path, rows)`.
 - `conftest.py` — `fake_hermes_root`, `clean_env` fixtures.
