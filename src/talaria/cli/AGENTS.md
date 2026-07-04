@@ -46,6 +46,10 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 - `talaria hermes install-skills-recursive` expands wildcard skill identifiers
   and delegates actual installation to the Hermes CLI; Talaria only owns the
   recursive expansion and `skills.disabled` policy update.
+- `talaria hermes serve-stop` detects and stops the dashboard/serve backend
+  by its listening port (profile-agnostic, Linux-only). It takes `--port`,
+  `--dry-run`, `--json`, and `--show-resolution`. `--profile` is recorded in
+  the report only and does not affect detection.
 
 ## Verification
 

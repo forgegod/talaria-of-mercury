@@ -26,6 +26,11 @@ caches.
 - `skill_install` is profile-scoped by design — it expands recursive skill
   identifiers, invokes `hermes skills install` for each child skill, and
   updates only that profile's `config.yaml` skill enable/disable policy.
+- `serve_stop` is profile-agnostic by design — it detects the Hermes
+  dashboard/serve backend by its listening TCP port via `/proc/net/tcp`
+  → socket inode → PID, then SIGTERM/poll/SIGKILL. It does not read
+  `state.db`, `logs/`, or any profile artefact. `--profile` is recorded
+  in the report only.
 
 ## Local Contracts
 
@@ -54,6 +59,16 @@ caches.
   backup. Usecases whose `model` is a "no override" sentinel
   (`auto`, `inherit`, `default`, ...) are skipped; existing
   operator-defined `model.aliases` keys are always preserved.
+- `serve_stop` reports use `ok: bool` and `reason` of
+  `stopped | none | detected | unsupported | partial`. It is Linux-only
+  (the `/proc` filesystem is the discovery substrate); on other
+  platforms it returns `ok: False, reason: "unsupported"` rather than
+  attempting a fallback. `--dry-run` must detect and report PIDs without
+  sending any signal. Detection MUST be port-based
+  (`/proc/net/tcp` → inode → `/proc/<pid>/fd`), never cmdline-pattern
+  based — the latter is exactly what `hermes serve --stop` does and it
+  misses backends launched with a global flag between module and
+  subcommand (e.g. `-p default dashboard`).
 
 ## Work Guidance
 
@@ -86,6 +101,12 @@ caches.
 - `auxiliary` tests cover alias injection, sentinel skipping, alias
   preservation, no-op cases, idempotency, dry-run suppression, profile
   path resolution, and CLI flags.
+- `serve_stop` tests cover `/proc/net/tcp` port/inode parsing, inode→PID
+  lookup (including self-exclusion and dedup), run() branches (none,
+  detected/dry-run, stopped, partial, unsupported), SIGTERM→SIGKILL
+  escalation, ProcessLookup/Permission handling, renderer verdicts, and
+  CLI --help/--show-resolution/--json. A synthetic `/proc` tree is built
+  in tmp_path; `TALARIA_PROC_ROOT` env redirects the proc-fd root.
 
 ## Child DOX Index
 
@@ -100,3 +121,5 @@ caches.
 - `auxiliary.py` — derive `model.aliases._<usecase>` from a profile's own
   `auxiliary.<usecase>.model` block. Single-profile; surfaced as
   `talaria config apply-auxiliary`.
+- `serve_stop.py` — detect and gracefully stop the Hermes dashboard/serve
+  backend by its listening port. Profile-agnostic; Linux-only.

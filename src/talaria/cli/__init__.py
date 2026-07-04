@@ -253,7 +253,27 @@ def sync_list_config_paths(profile, *, max_depth: int) -> list[str]:
     return list_config_paths(profile, max_depth=max_depth)
 
 
-# ---------- Subcommand: talaria config apply-auxiliary ----------
+# ---------- Subcommand: talaria hermes serve-stop ----------
+def cmd_hermes_serve_stop(args: argparse.Namespace) -> int:
+    from talaria.hermos import serve_stop
+
+    paths = resolve_paths(profile_flag=args.profile)
+    if args.show_resolution:
+        print(serve_stop.show_resolution(paths, port=args.port))
+        return 0
+    report = serve_stop.run(
+        paths,
+        port=args.port,
+        apply=not args.dry_run,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    exit_code, text = serve_stop.render_human(report)
+    print(text)
+    return exit_code
+
+
 def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
     from talaria.hermos import auxiliary
 
@@ -475,6 +495,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print expanded skill identifiers and target config path, then exit.",
     )
     p_skill_install.set_defaults(func=cmd_hermes_install_skills_recursive)
+
+    # talaria hermes serve-stop
+    p_serve_stop = hermes_sub.add_parser(
+        "serve-stop",
+        help="Stop a running Hermes dashboard/serve backend by its port.",
+        description=(
+            "Detect and gracefully stop the Hermes dashboard/serve backend "
+            "listening on a TCP port (default 9119). Detects the process by "
+            "its listening socket via /proc, so it finds backends that "
+            "`hermes serve --stop` misses when launched with a global flag "
+            "between the module and subcommand (e.g. the Hermes Desktop "
+            "app's `-p default dashboard` launch)."
+        ),
+    )
+    p_serve_stop.add_argument(
+        "--port", type=int, default=9119,
+        help="Port the Hermes backend is listening on (default: 9119).",
+    )
+    p_serve_stop.add_argument(
+        "--profile", help="Recorded in the report for debugging; does not affect detection.",
+    )
+    p_serve_stop.add_argument(
+        "--dry-run", action="store_true",
+        help="Detect and report the backend PID(s) without sending any signal.",
+    )
+    p_serve_stop.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_serve_stop.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print the port and detected PID(s), then exit.",
+    )
+    p_serve_stop.set_defaults(func=cmd_hermes_serve_stop)
 
     # talaria config ...
     config_grp = sub.add_parser(

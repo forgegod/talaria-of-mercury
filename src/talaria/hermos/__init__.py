@@ -12,6 +12,7 @@ from talaria.hermos import (
     context_cache_fix,
     moa_truncation,
     refresh_catalog,
+    serve_stop,
     skill_install,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "context_cache_fix",
     "moa_truncation",
     "refresh_catalog",
+    "serve_stop",
     "skill_install",
 ]
