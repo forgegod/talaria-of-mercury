@@ -289,7 +289,6 @@ talaria hermes install-skills-recursive 'skills-sh/addyosmani/agent-skills/*' --
 | `--profile`       | active  | Hermes profile to install into and whose `config.yaml` is updated.     |
 | `--force`         | off     | Pass `--force` to each `hermes skills install` invocation.             |
 | `--force-enable`  | off     | Enable every successfully installed child skill.                       |
-| `--force-enalbe`  | off     | Typo-compatible alias for `--force-enable`.                            |
 | `--enable SKILL...` | none  | Enable only matching skill names or identifiers; disable the rest.     |
 | `--dry-run`       | off     | Expand and report policy without invoking Hermes or writing config.    |
 | `--no-backup`     | off     | Skip `.bak` backup before updating `config.yaml`.                      |

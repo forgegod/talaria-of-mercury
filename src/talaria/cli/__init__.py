@@ -472,7 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pass --force to each hermes skills install invocation.",
     )
     p_skill_install.add_argument(
-        "--force-enable", "--force-enalbe", dest="force_enable", action="store_true",
+        "--force-enable", dest="force_enable", action="store_true",
         help="Enable every installed skill instead of disabling recursive installs by default.",
     )
     p_skill_install.add_argument(

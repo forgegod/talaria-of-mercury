@@ -227,5 +227,4 @@ class TestCli:
 
         assert proc.returncode == 0
         assert "--force-enable" in proc.stdout
-        assert "--force-enalbe" in proc.stdout
         assert "--enable" in proc.stdout
