@@ -22,6 +22,11 @@ Pytest suite for the Talaria CLI and library.
   — invoking the entry point proves the installed CLI surface works, not
   just the library functions.
 - `tests/__init__.py` exists so Pyright/pytest can import from `tests._helpers`.
+- **Silent-by-default.** CLI tests that assert on human-readable stdout
+  content must pass `-v/--verbose` explicitly; the default run is exit
+  code only. Tests that assert on JSON output, help text, completion
+  scripts, or `--show-resolution` output are unaffected because those
+  channels always print.
 
 ## Work Guidance
 

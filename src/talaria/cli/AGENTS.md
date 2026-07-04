@@ -54,6 +54,17 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   `talaria.hermos.moa_truncation`).
 - `--json` flag is always present on data-producing subcommands and produces
   a JSON dump via `json.dumps(payload, indent=2, default=str)`.
+- **Silent-by-default contract.** Every `cmd_*` function that produces a
+  human-readable report must gate the `print(text)` on `args.verbose` and
+  add `-v/--verbose` to the matching subparser. The default run is exit
+  code only — operators pipe through scripts and don't want chatter.
+  `--json` and `--show-resolution` always print (explicit data channels).
+  Errors always go to stderr. `talaria paths` is included: it is a debug
+  helper, not a noisy program, and the operator can opt in with `-v`.
+  When a feature module already has an internal `_say(verbose)` helper
+  (e.g. `skill_install`, `skill_uninstall`), the CLI-level gate is in
+  addition to it: `--verbose` enables both the per-step progress stream
+  and the final report print.
 - Profile-agnostic features (e.g. `talaria hermes refresh-catalog`) still
   call `resolve_paths()` for dispatcher shape symmetry, but the resolved
   profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.

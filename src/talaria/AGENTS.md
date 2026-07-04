@@ -16,6 +16,15 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 
 - Public CLI surface: `talaria [--version] <command> [<subcommand>] [...flags]`.
 - Exit codes: `0` clean, `1` signal fired, `2` tool error.
+- **Silent by default.** Every CLI subcommand that produces a
+  human-readable report is exit-code-only when run without flags;
+  `-v/--verbose` is the opt-in to actually print the report on stdout.
+  `--json` and `--show-resolution` always print (explicit data
+  channels). Errors always go to stderr. The contract is enforced
+  in the dispatcher layer (`src/talaria/cli/AGENTS.md`) and applies
+  uniformly to every command group: `paths`, `hermes`, `config`,
+  `skills`, `completion` (completion is excluded — its sole output
+  is the script itself, which is the data the operator asked for).
 - All filesystem and SQLite access is **read-only against the Hermes runtime**
   for inspection features (`hermes moa-truncation`, `paths`).
   Write-bearing carve-outs are explicit: `talaria config sync` copies profile

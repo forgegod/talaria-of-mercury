@@ -138,6 +138,7 @@ class TestContextCacheFixCli:
                 "vc-client",
                 "--no-backup",
                 "--only-existing",
+                "--verbose",
             ],
             cwd=REPO_ROOT,
             env={"HOME": str(tmp_path)},

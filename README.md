@@ -79,7 +79,13 @@ Talaria does **not** consume `HERMES_HOME` for resolution. That env var is set b
 
 ### Output
 
-Every data-producing subcommand accepts `--json` and emits a stable JSON document to stdout suitable for cron, dashboards, and other agents. Human-readable output is the default for terminals.
+Talaria is **silent by default** so it scripts cleanly. Every data-producing subcommand accepts:
+
+- `--json` — emit a stable JSON document to stdout (always prints, suitable for cron, dashboards, and other agents).
+- `--show-resolution` — print the resolved paths / sources and exit 0 without running the feature (always prints, useful for debugging).
+- `-v`, `--verbose` — print the human-readable report to stdout. Without this flag the default run is exit code only; stdout stays empty on success and the exit code is the only signal. Errors still go to stderr.
+
+`talaria completion` is the one exception: its only output is the completion script itself, which the operator asked for.
 
 ### Debug helpers
 
@@ -143,6 +149,7 @@ talaria hermes moa-truncation --state-db /var/lib/hermes/state.db --log-dir /var
 | `--log-dir PATH` | resolved | Override the `logs/` directory. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print resolved paths and exit 0 without running the signals. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 ### Signals
 
@@ -180,6 +187,7 @@ talaria hermes refresh-catalog --dst /tmp/kilocode.json --json
 | `--force` | off | Refetch even when the cache is fresh. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved cache path + source URL and exit 0. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 Three steps: fetch the live catalog, reshape into the Hermes manifest schema (normalising pricing to per-million-token values), and atomic-write to the destination via a sibling temp file + `os.replace`.
 
@@ -208,6 +216,7 @@ talaria hermes fix-context-cache --dry-run
 | `--no-backup` | off | Skip `.bak` backup before overwriting. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved cache path and known-fix table, then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 ## Feature: `talaria hermes serve-stop`
 
@@ -230,6 +239,7 @@ talaria hermes serve-stop --dry-run   # detect and report PIDs without sending a
 | `--dry-run` | off | Detect and report the backend PID(s) without sending any signal. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the port and detected PID(s), then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 Report `reason`: `stopped` | `none` | `detected` (dry-run) | `partial` (some PIDs survived SIGKILL).
 
@@ -272,6 +282,7 @@ talaria hermes log-rotate --all-profiles --dry-run --json
 | `--dry-run` | off | Plan actions without copying, gzipping, truncating, or deleting. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved log dir, scanned size, and planned actions, then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 ### Report shape
 
@@ -319,7 +330,7 @@ talaria skills install 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
 | `--no-backup` | off | Skip `.bak` backup before updating `config.yaml`. |
 | `--json` | off | Emit the structured report. |
 | `--show-resolution` | off | Print expanded identifiers and target config path, then exit. |
-| `-v`, `--verbose` | off | Stream per-skill progress to stderr. |
+| `-v`, `--verbose` | off | Stream per-skill progress to stderr AND print the human-readable report (default: silent, exit code only). |
 
 ### Enable policy
 
@@ -364,7 +375,7 @@ talaria skills uninstall 'skills-sh/addyosmani/agent-skills/*' --dry-run --json
 | `--no-backup` | off | Skip `.bak` backup before updating `config.yaml`. |
 | `--json` | off | Emit the structured report. |
 | `--show-resolution` | off | Print expanded identifiers and target config path, then exit. |
-| `-v`, `--verbose` | off | Stream per-skill progress to stderr. |
+| `-v`, `--verbose` | off | Stream per-skill progress to stderr AND print the human-readable report (default: silent, exit code only). |
 
 Partial failures: successfully uninstalled skills are still cleaned up from `skills.disabled`, but the command exits `2` if any uninstall fails.
 
@@ -397,6 +408,7 @@ talaria skills create-category preview --dry-run
 | `--no-backup` | off | Skip `.bak` backup when overwriting an existing `DESCRIPTION.md`. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved category directory and validation result, then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 Category names must match Hermes' regex: `^[a-z][a-z0-9_/-]*$` (lowercase letters, digits, hyphens, underscores, slashes). Creating an existing category is a no-op on the directory; re-writing its `DESCRIPTION.md` goes through the atomic backup writer.
 
@@ -449,7 +461,7 @@ talaria config sync default --list
 | `--force-config` | off | Overwrite target `config.yaml` even when source is not newer. |
 | `--list` | off | List dot-notation paths in source `config.yaml` and exit. |
 | `--json` | off | Emit JSON report instead of human-readable output. |
-| `-v`, `--verbose` | off | Show diffs, per-skill detail, and source/target banners. |
+| `-v`, `--verbose` | off | Print the human-readable report on stdout with diffs, per-skill detail, and source/target banners (default: silent, exit code only). |
 
 ### Sync phases
 
@@ -483,6 +495,7 @@ talaria config apply-auxiliary --dry-run
 | `--no-backup` | off | Skip `.bak` backup before overwriting. |
 | `--json` | off | Emit JSON report instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved config path and derived aliases, then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 ## Feature: `talaria config sync-env`
 
@@ -525,6 +538,7 @@ talaria config sync-env --profile hermes-vc --dry-run --json
 | `--no-backup` | off | Skip `.bak` backup before overwriting `.env`. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved `.env` path and which keys would be updated, then exit. |
+| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 The `export` prefix on matching lines is preserved on refresh and dropped on disable; comments and blank lines are preserved verbatim. Values are never echoed in `--show-resolution` output.
 
@@ -553,8 +567,12 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermos/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermos/` when they operate on one profile's own files.
 
 1. Add `talaria/hermos/<feature>.py` exposing `run(paths, **opts)` and `render_human(report)`.
-2. Wire its argparse subparser into `talaria.cli.build_parser`.
-3. Add tests under `tests/test_<feature>.py` using the shared `fake_hermes_root` fixture.
+2. Wire its argparse subparser into `talaria.cli.build_parser` and gate the
+   human-readable `print(...)` on `args.verbose` (add `-v, --verbose` to the
+   subparser) — Talaria is silent by default; only the exit code is emitted.
+3. Add tests under `tests/test_<feature>.py` using the shared `fake_hermes_root`
+   fixture. CLI tests that assert on human-readable stdout must pass
+   `--verbose` explicitly.
 
 ## Development
 

@@ -682,6 +682,36 @@ class TestSyncCLI:
         assert payload["any_writes"] is True
         assert payload["config"]["write_confirmed"] is True
 
+    def test_default_run_is_silent_on_success(self, tmp_path: Path) -> None:
+        """Silent-by-default: no --verbose => no human report on stdout.
+
+        The exit code is the only signal. The YAML write is verified
+        separately so we know the run actually executed.
+        """
+        _make_source(tmp_path, "src", {"model": {"name": "x"}, "agent": {"x": 1}})
+        _make_profile(tmp_path, "dst")
+        result = self._cli(
+            "src", "dst", "-e", "model", "--force-config",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            env={"HOME": str(tmp_path)},
+        )
+        assert result.returncode == 0
+        assert result.stdout == "", f"expected silent stdout, got: {result.stdout!r}"
+        merged = load_yaml(tmp_path / HERMES / "profiles" / "dst" / "config.yaml")
+        assert merged["agent"]["x"] == 1  # the write actually happened
+
+    def test_verbose_run_prints_report(self, tmp_path: Path) -> None:
+        """--verbose restores the human-readable report on stdout."""
+        _make_source(tmp_path, "src", {"model": {"name": "x"}, "agent": {"x": 1}})
+        _make_profile(tmp_path, "dst")
+        result = self._cli(
+            "src", "dst", "-e", "model", "--force-config", "--verbose",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            env={"HOME": str(tmp_path)},
+        )
+        assert result.returncode == 0
+        assert "talaria sync" in result.stdout
+
     def test_list_paths(self, tmp_path: Path) -> None:
         _make_source(tmp_path, "src", {"model": {"name": "x"}, "agent": {"x": 1}})
         result = self._cli("src", "--list", env={"HOME": str(tmp_path)})

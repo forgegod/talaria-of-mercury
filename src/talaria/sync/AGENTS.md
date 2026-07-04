@@ -65,6 +65,12 @@ profiles.
 - `dotpath` helpers never raise on missing keys — return
   `(False, None)`. Phases that need to warn the operator about a
   missing `--only` path do so explicitly.
+- **Silent-by-default.** The CLI gates the human-readable report
+  on `-v/--verbose`; the default `talaria config sync` run is exit
+  code only. The renderer itself still produces the full report
+  text; the dispatcher in `talaria/cli/__init__.py` decides whether
+  to print it. `--json` and `--list` always print (explicit data
+  channels). Errors always go to stderr via `print_error(...)`.
 
 ## Verification
 

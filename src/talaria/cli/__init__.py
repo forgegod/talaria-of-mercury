@@ -57,10 +57,11 @@ def cmd_paths(args: argparse.Namespace) -> int:
             },
         })
         return 0
-    print(f"profile:     {paths.profile}")
-    print(f"hermes_root: {paths.hermes_root}")
-    print(f"state_db:    {paths.state_db}")
-    print(f"log_dir:     {paths.log_dir}")
+    if args.verbose:
+        print(f"profile:     {paths.profile}")
+        print(f"hermes_root: {paths.hermes_root}")
+        print(f"state_db:    {paths.state_db}")
+        print(f"log_dir:     {paths.log_dir}")
     return 0
 
 
@@ -79,9 +80,11 @@ def cmd_hermes_moa_truncation(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 1 if report["fired"] else 0
-    exit_code, text = moa_truncation.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = moa_truncation.render_human(report)
+        print(text)
+        return exit_code
+    return 1 if report["fired"] else 0
 
 
 # ---------- Subcommand: talaria hermes refresh-catalog ----------
@@ -115,9 +118,11 @@ def cmd_hermes_refresh_catalog(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = refresh_catalog.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = refresh_catalog.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 # ---------- Subcommand: talaria hermes fix-context-cache ----------
 def cmd_hermes_fix_context_cache(args: argparse.Namespace) -> int:
@@ -138,9 +143,11 @@ def cmd_hermes_fix_context_cache(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = context_cache_fix.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = context_cache_fix.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria hermes skills install ----------
@@ -166,9 +173,11 @@ def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = skill_install.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = skill_install.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria skills uninstall ----------
@@ -189,9 +198,11 @@ def cmd_hermes_skills_uninstall(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = skill_uninstall.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = skill_uninstall.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria skills create-category ----------
@@ -214,9 +225,11 @@ def cmd_hermes_skills_create_category(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = skill_category.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = skill_category.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria config sync ----------
@@ -293,9 +306,11 @@ def cmd_sync(args: argparse.Namespace) -> int:
         sys.stdout.write(render_json(report))
         return 0 if report.ok else 2
 
-    exit_code, text = render_human(report, verbose=args.verbose)
-    sys.stdout.write(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = render_human(report, verbose=True)
+        sys.stdout.write(text)
+        return exit_code
+    return 0 if report.ok else 2
 
 
 def sync_list_config_paths(profile, *, max_depth: int) -> list[str]:
@@ -320,9 +335,11 @@ def cmd_hermes_serve_stop(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = serve_stop.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = serve_stop.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria hermes log-rotate ----------
@@ -405,9 +422,10 @@ def cmd_hermes_log_rotate(args: argparse.Namespace) -> int:
         _print_json({"reports": reports})
         return 0
 
-    for r in reports:
-        exit_code, text = log_rotate_module.render_human(r)
-        print(text)
+    if args.verbose:
+        for r in reports:
+            exit_code, text = log_rotate_module.render_human(r)
+            print(text)
     return 0
 
 
@@ -428,9 +446,11 @@ def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = auxiliary.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = auxiliary.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 def cmd_config_sync_env(args: argparse.Namespace) -> int:
@@ -461,9 +481,11 @@ def cmd_config_sync_env(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(report)
         return 0 if report["ok"] else 2
-    exit_code, text = sync_env.render_human(report)
-    print(text)
-    return exit_code
+    if args.verbose:
+        exit_code, text = sync_env.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 
 # ---------- Subcommand: talaria completion ----------
@@ -510,6 +532,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_paths.add_argument("--state-db", type=Path, help="Explicit state.db path override.")
     p_paths.add_argument("--log-dir", type=Path, help="Explicit logs/ directory override.")
     p_paths.add_argument("--json", action="store_true", help="Emit JSON.")
+    p_paths.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the resolved paths to stdout (default: silent, exit code only).",
+    )
     p_paths.set_defaults(func=cmd_paths)
 
     # talaria completion
@@ -572,6 +598,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-resolution", action="store_true",
         help="Print which profile and paths were resolved, then exit.",
     )
+    p_moa.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
+    )
     p_moa.set_defaults(func=cmd_hermes_moa_truncation)
 
     # talaria hermes refresh-catalog
@@ -617,6 +647,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-resolution", action="store_true",
         help="Print the resolved cache path and source URL, then exit.",
     )
+    p_catalog.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
+    )
     p_catalog.set_defaults(func=cmd_hermes_refresh_catalog)
 
     # talaria hermes fix-context-cache
@@ -655,6 +689,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-resolution", action="store_true",
         help="Print the resolved cache path and known-fix table, then exit.",
     )
+    p_context.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
+    )
     p_context.set_defaults(func=cmd_hermes_fix_context_cache)
 
     # talaria hermes serve-stop
@@ -686,6 +724,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve_stop.add_argument(
         "--show-resolution", action="store_true",
         help="Print the port and detected PID(s), then exit.",
+    )
+    p_serve_stop.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_serve_stop.set_defaults(func=cmd_hermes_serve_stop)
 
@@ -741,6 +783,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_log_rotate.add_argument(
         "--show-resolution", action="store_true",
         help="Print resolved log dir, scanned size, and planned actions, then exit.",
+    )
+    p_log_rotate.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_log_rotate.set_defaults(func=cmd_hermes_log_rotate)
 
@@ -822,7 +868,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_skill_install.add_argument(
         "-v", "--verbose", action="store_true",
-        help="Stream per-skill progress (expansion, each install, config policy) to stderr.",
+        help="Stream per-skill progress to stderr AND print the human-readable report "
+             "on stdout (default: silent, exit code only).",
     )
     p_skill_install.set_defaults(func=cmd_hermes_skills_install)
 
@@ -861,7 +908,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_skill_uninstall.add_argument(
         "-v", "--verbose", action="store_true",
-        help="Stream per-skill progress (expansion, each uninstall, config cleanup) to stderr.",
+        help="Stream per-skill progress to stderr AND print the human-readable report "
+             "on stdout (default: silent, exit code only).",
     )
     p_skill_uninstall.set_defaults(func=cmd_hermes_skills_uninstall)
 
@@ -905,6 +953,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_skill_create_cat.add_argument(
         "--show-resolution", action="store_true",
         help="Print the resolved category directory and validation result, then exit.",
+    )
+    p_skill_create_cat.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_skill_create_cat.set_defaults(func=cmd_hermes_skills_create_category)
 
@@ -994,7 +1046,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.add_argument("--json", action="store_true",
                         help="Emit JSON report instead of human-readable output.")
     p_sync.add_argument("-v", "--verbose", action="store_true",
-                        help="Show diffs, per-skill detail, and source/target banners.")
+                        help="Print the human-readable report on stdout with diffs, "
+                             "per-skill detail, and source/target banners "
+                             "(default: silent, exit code only).")
     p_sync.set_defaults(func=cmd_sync)
 
     # talaria config apply-auxiliary
@@ -1030,6 +1084,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_auxiliary.add_argument(
         "--show-resolution", action="store_true",
         help="Print the resolved config path and the aliases that would be derived, then exit.",
+    )
+    p_auxiliary.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_auxiliary.set_defaults(func=cmd_config_apply_auxiliary)
 
@@ -1092,6 +1150,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync_env.add_argument(
         "--show-resolution", action="store_true",
         help="Print the resolved .env path and which keys would be updated, then exit.",
+    )
+    p_sync_env.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_sync_env.set_defaults(func=cmd_config_sync_env)
 

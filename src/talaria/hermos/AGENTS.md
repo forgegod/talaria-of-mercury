@@ -219,6 +219,18 @@ caches.
 - Feature modules expose `run()` + `render_human()` and use Talaria CLI
   conventions (`--state-db`, `--log-dir`, `--profile`) for profile-scoped
   inputs.
+- **Silent-by-default.** Feature modules should NOT print to stdout or
+  stderr from `run()` unless the caller passed an explicit verbosity
+  flag. The internal `_say(msg)` helper pattern (used by `skill_install`
+  and `skill_uninstall`) gates every per-step progress line on a
+  `verbose: bool` parameter; new feature modules should follow the
+  same pattern. The CLI dispatcher (`talaria/cli/__init__.py`) gates
+  the final `print(render_human(...))` on `args.verbose` — so the
+  `render_human()` function may keep producing the full report; the
+  dispatcher decides whether the operator sees it. Errors are always
+  surfaced via the report's `ok: False` + `error` field (and via
+  `print_error(...)` from the sync renderer when the failure happens
+  before a report can be assembled), never via ad-hoc prints.
 - Feature-specific constants (regexes, thresholds, default windows) live at
   the top of the module.
 - Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`
