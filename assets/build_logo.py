@@ -37,14 +37,29 @@ AMBER = "#f9a23a"
 # ---------------------------------------------------------------------------
 # Glyph geometry — vector path, not ASCII
 # ---------------------------------------------------------------------------
-# All coordinates in a 240×184 viewBox.  The glyph is centred at x=120.
-# Wings extend up to y=22, slim base bar bottom at y=184.  Each side
-# (left + right) is a single closed path that flows 3 wing feathers
-# into the slim base bar with no internal seam.
+# Glyph viewBox: 240 wide x 184 tall (kept as the
+# single source of truth for `_solid_3_paths()` and every
+# band/top/bottom offset in the lockup composition).
 GLYPH_VB_W = 240
 GLYPH_VB_H = 184
 GLYPH_W = 240
 GLYPH_H = 184
+
+# Thin amber band — single geometry used by both the lockup
+# ribbon (via cap-derived math that lands here) and the standalone
+# mark (passed explicitly).  Tuned so the band:
+#   - sits in the lower portion of the wings (catches the lower
+#     feathers + the very top of the base bar),
+#   - stays well clear of the wing interior so it doesn't read
+#     as a banner through the wing middle,
+#   - is thin enough (~14% of glyph height) that the wordmark
+#     letterforms below stay mostly gold.
+# Math: cap_top is at lockup y=70 (cap=120.96, baseline=191).
+# band_top_lockup = baseline - cap + cap*0.72 = 157.13.  Glyph
+# origin_y in the lockup = 7, so the glyph-local band is at
+# y_local = 150.13.  Round to integers for cleaner output.
+GLYPH_BAND_TOP_LOCAL = 150
+GLYPH_BAND_HEIGHT = 30
 
 
 # ---------------------------------------------------------------------------
@@ -236,23 +251,31 @@ def render_glyph(
 
     # Ribbon overlay: clipPath rect.  Two ways to specify the band:
     #   1. `band_top_local` (glyph-local coords) — used by the mark
-    #      (the band is the bottom 36% of the glyph bbox).
+    #      (the band sits at the lower edge of the wings).
     #   2. `band_top_lockup` (lockup coords) — used by the lockup
     #      (the band matches the wordmark band so the amber strip
     #      is continuous across both halves).
     # Exactly one of these should be supplied by the caller.  When
     # neither is supplied, default to the lockup rule.
-    _cap = 168 * 0.72
+    # Defaults use `GLYPH_BAND_TOP_LOCAL` / `GLYPH_BAND_HEIGHT`
+    # (single source of truth, top of this file).  The lockup's
+    # cap-derived math in `render_wordmark()` lands at the same
+    # glyph-local position.
     if band_height is None:
-        if band_top_local is not None:
-            # Mark rule: bottom 36% of the glyph viewBox (184 units).
-            band_height = GLYPH_VB_H * 0.36
+        if band_top_local is None and band_top_lockup is None:
+            band_height = GLYPH_BAND_HEIGHT
+        elif band_top_local is not None:
+            # Mark rule uses the same height as the lockup ribbon so
+            # both artifacts render the same band thickness.
+            band_height = GLYPH_BAND_HEIGHT
         else:
-            band_height = _cap * 0.36
+            # Lockup rule: band_height comes from the wordmark math
+            # (cap * 0.25).
+            band_height = 168 * 0.72 * 0.25
     if band_top_local is not None:
         pass  # glyph-local override already supplied
     elif band_top_lockup is None:
-        band_top_local = (191 - _cap + _cap * 0.68) - origin_y
+        band_top_local = GLYPH_BAND_TOP_LOCAL
     else:
         band_top_local = band_top_lockup - origin_y
 
@@ -297,12 +320,28 @@ LOCKUP_H = max(GLYPH_H, WORDMARK_H) + 100
 
 
 def render_wordmark(*, origin_x: int, origin_y: int) -> str:
-    """Render TALARIA with a gold top and amber bottom band."""
+    """Render TALARIA with a gold top and a thin amber bottom band.
+
+    Band math: a thin strip in the lower portion of the cap-height,
+    anchored to match the lockup ribbon position.  Constants are
+    taken straight from `GLYPH_BAND_TOP_LOCAL` /
+    `GLYPH_BAND_HEIGHT` at the top of this file (single source of
+    truth) so the lockup ribbon, the wordmark band, and the mark
+    ribbon all sit on the same y line.
+
+    Note: the wordmark uses the cap-derived position
+    (band_top = baseline - cap + cap*0.72 = 157.13 in lockup
+    coords, glyph-local 150.13) while the mark uses the explicit
+    `GLYPH_BAND_TOP_LOCAL = 150`.  The 0.13-unit difference is
+    below visual resolution and intentional — keeps the wordmark
+    math self-contained (anchored to the cap, no glyph coupling).
+    See `references/band-rule-lockup-vs-mark.md` for the recipe.
+    """
     x = origin_x
     y = origin_y
     cap = WORDMARK_FONT * 0.72
-    band_top = y - cap + cap * 0.68
-    band_height = cap * 0.36
+    band_top = y - cap + cap * 0.72
+    band_height = GLYPH_BAND_HEIGHT
     band_width = WORDMARK_W
 
     return (
@@ -387,13 +426,10 @@ def render_mark_only() -> str:
     """Square mark-only: winged-sandal solid_3 glyph on a transparent
     background, centred with padding.
 
-    Band rule: the mark uses the standard glyph-bbox rule (bottom
-    36%) rather than the wordmark-aligned rule (which makes sense
-    only when a wordmark is present to anchor the strip).  In glyph-
-    local coords the band starts at y = 184 - 0.36 * 184 = 117.76 and
-    extends 66.24 units down to the bbox bottom.  This puts the
-    amber ribbon visually across the lower portion of the wings
-    and the base bar, mirroring the lockup ribbon position.
+    Band rule: the mark uses the SAME thin-strip band geometry as
+    the lockup ribbon (`GLYPH_BAND_TOP_LOCAL` / `GLYPH_BAND_HEIGHT`).
+    The amber ribbon lands at the lower edge of the wings,
+    catching the lower feathers + the very top of the base bar.
     """
     pad = 48
     w = GLYPH_W + 2 * pad
@@ -401,8 +437,8 @@ def render_mark_only() -> str:
     glyph = render_glyph(
         origin_x=pad,
         origin_y=pad,
-        band_top_local=GLYPH_VB_H * 0.64,  # bottom 36% — same rule
-                                          # as the original mark
+        band_top_local=GLYPH_BAND_TOP_LOCAL,
+        band_height=GLYPH_BAND_HEIGHT,
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '

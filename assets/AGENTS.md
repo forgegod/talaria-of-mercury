@@ -39,13 +39,18 @@ background so it can be placed on any surface.
   renders use a transparent background (no navy, no other
   background colour) so the lockup can be placed on any surface.
 - **Bicolour** — the production glyph AND the wordmark both
-  carry a bicolour band (gold on top, amber on the bottom).
-  The wordmark uses gold-on-top with a clipPath-painted amber
-  bottom band covering 36% of the cap-height.  The glyph uses
-  the same bicolour via a clipPath: a second amber copy of each
-  wing path is painted on top of the gold wings and clipped to
-  the band region, producing an amber strip across the lower
-  portion of the wings and the base bar.
+  carry a thin amber bicolour band (gold on top, amber on the
+  bottom).  The wordmark uses gold-on-top with a clipPath-painted
+  amber strip of height `GLYPH_BAND_HEIGHT = 30` glyph-local units
+  (= `cap * 0.25`) anchored at `band_top = cap * 0.72` from the
+  cap top.  The glyph achieves the same bicolour via a clipPath
+  overlay: amber copies of each wing `<path>` are painted ON TOP
+  of the gold wings and clipped to the same glyph-local band
+  region (`GLYPH_BAND_TOP_LOCAL = 150`, `GLYPH_BAND_HEIGHT = 30`).
+  The band sits at the lower edge of the wings, catching the
+  lower feathers + the top of the base bar.  The clipPath rect
+  matches the band rect — never a full-viewBox clip — so the
+  gold wings remain visible above the strip.
 - **Geometry** — production glyph is the `solid_3` winged-sandal:
   two symmetric half-silhouettes (left + right) that meet at the
   centreline x=120.  Each half is a SINGLE closed `<path>` whose
@@ -59,21 +64,31 @@ background so it can be placed on any surface.
   data is in `_solid_3_paths()` (also returns the base bar
   geometry) in `build_logo.py`.  The standalone mark uses the
   same path data and the same combined-silhouette structure.
-- **Band rule — lockup vs. mark** — the two artifacts use
-  DIFFERENT band rules:
-    - The lockup aligns the glyph ribbon with the wordmark band
-      (`band_top_lockup = 152.29`, `band_height = 43.55`) so the
-      amber strip is one continuous horizontal line across both
-      halves of the lockup.  Implemented by passing
-      `band_top_lockup` to `render_glyph()`.
-    - The standalone mark uses the standard glyph-bbox rule
-      (bottom 36% of the 184-tall glyph: `band_top_local =
-      117.76`, `band_height = 66.24`).  This places the amber
-      ribbon across the lower wings and the base bar; the
-      wordmark-aligned rule would put a strip floating in the
-      visual middle of the mark, which reads as a banner rather
-      than a ribbon.  Implemented by passing `band_top_local =
-      GLYPH_VB_H * 0.64` to `render_glyph()`.
+- **Band rule — lockup vs. mark (same geometry)** — the two
+  artifacts share the SAME thin band geometry:
+    - Band height: `GLYPH_BAND_HEIGHT = 30` glyph-local units
+      (= `cap * 0.25`, ~14% of glyph height).
+    - Band top in glyph-local coords: `GLYPH_BAND_TOP_LOCAL = 150`
+      (just below the lower-feather inner endpoint, catching the
+      outer wing tips + the top of the base bar).
+    - The lockup derives this from cap-derived math:
+      `band_top_lockup = word_baseline_y - cap + cap*0.72`
+      (157.13 in lockup coords; = glyph-local 150.13 with the
+      7-unit glyph origin offset).  `band_height = 30`.
+    - The mark passes `band_top_local = GLYPH_BAND_TOP_LOCAL` and
+      `band_height = GLYPH_BAND_HEIGHT` directly to
+      `render_glyph()`.
+    - Both lockup ribbon and wordmark band sit on the same y line
+      (lockup y=157..187).  The cap-derived position of 157.13 is
+      rounded to 150 glyph-local for the mark rule (the 0.13-unit
+      difference is below visual resolution).
+    - Do not increase the band height or move it higher — earlier
+      wider bands put a strip floating through the wing middle.
+      Earlier narrower bands weren't tried yet; the user accepted
+      "smaller part of the glyph" overlap.
+    - See `references/band-rule-lockup-vs-mark.md` for the recipe
+      and the explicit failure modes (banner-through-middle,
+      misaligned halos, full-viewBox clip merge).
 - **Alignment** — in the lockup, the glyph is translated so the
   base bar bottom (local y=184) sits exactly on the wordmark
   baseline.  Position is via `_glyph_origin_y_for_baseline()`.
@@ -100,17 +115,20 @@ background so it can be placed on any surface.
 - Visually inspect `logo-1024.png` before commit: TALARIA must
   be fully visible (no right-edge clipping), glyph + wordmark
   vertically centred, three feathers per side clearly readable,
-  the GLYPH MUST carry the BICOLOUR RIBBON (gold upper wings,
-  amber band cutting across the lower portion of the wings and
-  the base bar), the amber strip on the glyph MUST sit on the
-  SAME y line as the amber band on TALARIA, the base bar bottom
-  must sit on the wordmark baseline.
+  the GLYPH MUST carry the THIN BICOLOUR RIBBON (gold upper
+  wings, amber strip cutting across the lower edge of the wings
+  and the top of the base bar), the amber strip on the glyph MUST
+  sit on the SAME y line as the amber band on TALARIA
+  (lockup y=157..187), the base bar bottom must sit on the
+  wordmark baseline.
 - Open `logo-mark.svg` in any SVG viewer to confirm: glyph reads
   as a winged-sandal silhouette on its own (without the wordmark),
-  with gold upper wings, an amber bicolour ribbon through the
-  lower portion of the wings and the base bar, and the base bar
-  at the bottom of the bbox.  The amber strip must NOT be a
-  banner floating in the visual middle of the mark.
+  with gold upper wings, a thin amber bicolour ribbon at the
+  lower edge of the wings (glyph-local y=150..180, the same
+  geometry as the lockup ribbon), and the base bar at the bottom
+  of the bbox.  The amber strip MUST sit at the lower edge of
+  the wings — NOT through the middle of the wing area (banner
+  failure mode).
 
 ## Child DOX Index
 

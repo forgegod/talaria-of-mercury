@@ -3,7 +3,7 @@
   <!-- solid_3 winged-sandal glyph (band-aligned) -->
   <defs>
     <clipPath id="talaria-glyph-band">
-      <rect x="0" y="145.292800" width="240" height="43.545600"/>
+      <rect x="0" y="150.000000" width="240" height="30.000000"/>
     </clipPath>
   </defs>
   <g transform="translate(64 7)">
@@ -22,6 +22,6 @@
     </clipPath>
   </defs>
   <text x="384" y="191" font-family="Georgia, 'Times New Roman', serif" font-size="168" font-weight="700" letter-spacing="12" fill="#ffc72c">TALARIA</text>
-  <rect x="380" y="152.2928" width="1100" height="43.54559999999999" fill="#f9a23a" clip-path="url(#talaria-band-clip)"/>
+  <rect x="380" y="157.13119999999998" width="1100" height="30" fill="#f9a23a" clip-path="url(#talaria-band-clip)"/>
 
 </svg>
