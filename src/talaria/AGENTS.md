@@ -25,9 +25,13 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   live environment and can optionally extend the variable scope
   (`--add-key`, `--skip-key`, `--disable-key`, `--enable-key`),
   `talaria hermes fix-context-cache` repairs `context_length_cache.yaml`
-  in one profile, and `talaria skills install` / `talaria skills uninstall`
-  install or remove third-party skills then update that profile's
-  `skills.disabled` policy. None touches `state.db` or rotates logs.
+  in one profile, `talaria hermes log-rotate` rotates and prunes the
+  active profile's `logs/` (and every profile's `logs/` with
+  `--all-profiles`) per age and per-file/total size caps, and
+  `talaria skills install` / `talaria skills uninstall` install or
+  remove third-party skills then update that profile's
+  `skills.disabled` policy. None of the inspection features touches
+  `state.db`.
 - Every CLI subcommand must accept `--json` and a human-readable default renderer.
 
 ## Work Guidance

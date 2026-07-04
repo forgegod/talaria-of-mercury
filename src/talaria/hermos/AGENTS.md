@@ -51,6 +51,29 @@ caches.
   libproc on macOS, NT APIs on Windows) behind one cross-platform call.
   It does not read `state.db`, `logs/`, or any profile artefact.
   `--profile` is recorded in the report only.
+- `log_rotate` is profile-scoped by design — it rotates and prunes the
+  active profile's `logs/` (or every profile's `logs/` with
+  `--all-profiles`) using explicit flags. The active file rotation
+  pattern is **copy → gzip → truncate** (never an in-place shift):
+  when `--max-size` is set, an active file whose gzipped payload
+  would exceed the cap is copied to `<name>.<ext>.1.gz` (gzip level
+  6) and the source is truncated to zero bytes. `--max-age` deletes
+  rotated copies and `logs/curator/<ts>/` snapshot directories
+  whose mtime is older than the threshold. `--max-total` bounds the
+  aggregate on-disk size of the directory by deleting the oldest
+  rotated copies first. `--keep N` is a per-base-name floor that
+  protects the newest N rotated copies regardless of age or size.
+  Curator snapshot directories are deleted as a single unit
+  (never partially) and the `--max-size` rotation is never
+  substituted by a `.N` shift because Hermes writers append
+  concurrently and a shift would race them. The tool is
+  **explicit-only**: with no prune/rotate flags (`--max-size`,
+  `--max-age`, `--max-total`) the file system is never touched and
+  the report's `dry_run` field is true regardless of `--apply`; with
+  at least one flag set, `--apply` is the default and `--dry-run`
+  previews. The displayed default values (10 MiB gziped per file,
+  30 days, 50 MiB total, keep 1) are not implicit limits — they are
+  documentation of sensible values the operator can pass.
 - `sync_env` is profile-scoped by design — it refreshes the selected
   profile's `.env` values from the live process environment
   (`os.environ`). For every `KEY=...` line already present in the
@@ -150,6 +173,23 @@ caches.
   adds keys and the target file does not exist, the file is created
   with the added lines; when no key is addable and the file is missing,
   it stays a no-op.
+- `log_rotate` reports use `ok: bool` and carry the **explicit-only**
+  contract: `dry_run: true` whenever no prune/rotate flag was supplied
+  OR the operator passed `--dry-run`. Fields: `scanned_files`,
+  `scanned_bytes`, `total_size_after`, `rotated_count`,
+  `truncated_count`, `deleted_count`, `deleted_bytes`, and a flat
+  `actions` list (one entry per `rotate` / `copy` / `truncate` /
+  `delete` / `skip` step, each with `path`, `action`, `reason`,
+  `size_before`, `size_after`, `compressed_size`). The
+  `curator/<ts>/` snapshot directories are deleted as a single unit;
+  the active file rotation is `copy → gzip → truncate` (single
+  `.1.gz` slot, never an in-place shift). The active file is never
+  deleted — `--max-size` rotates, not removes, regardless of how
+  large the gzipped payload is. The `--keep` floor protects the
+  newest N rotated copies per base name; the `--max-total` rule
+  walks the rotated set oldest-first and stops as soon as the
+  total is below the cap. `--dry-run` must not copy, gzip, truncate,
+  or delete any bytes (verified by tests).
 - `skill_category` reports use `ok: bool`, `created: bool`, and
   `description_written: bool`. Writes go through the atomic backup
   writer. `--dry-run` must not create a directory or write
@@ -259,6 +299,17 @@ caches.
   in one run, `show_resolution` `would_skip`/`would_disable`/
   `would_enable` shape, and CLI `--skip-key`/`--disable-key`/
   `--enable-key`.
+- `log_rotate` tests cover the rotation parser (`_parse_rotated` for
+  active, plain rotated, gz rotated, multi-digit index, README
+  exclusion, empty string), the classifier (active/rotated/other),
+  active rotation (under cap skipped, over cap copies+gzip+truncates,
+  second rotation overwrites the first), age-based delete (old
+  rotated copies, curator snapshot directories, max-age=0 with
+  keep floor), aggregate size prune (oldest-first with keep floor,
+  under-cap no-op), the keep floor (keep=2 protects two newest,
+  keep=0 protects nothing), dry-run suppression (no copy, no
+  delete, no rotate), multi-profile target enumeration, run/render
+  shape, `show_resolution` option echo, and CLI `--help`.
 
 ## Child DOX Index
 
@@ -287,6 +338,15 @@ caches.
   `talaria config apply-auxiliary`.
 - `serve_stop.py` — detect and gracefully stop the Hermes dashboard/serve
   backend by its listening port. Profile-agnostic; cross-platform via psutil.
+- `log_rotate.py` — rotate and prune the active profile's `logs/`
+  directory (or every profile's `logs/` with `--all-profiles`).
+  `--max-size` rotates active files whose gzipped payload exceeds the
+  cap via `copy → gzip → truncate`; `--max-age` deletes old rotated
+  copies and `logs/curator/<ts>/` snapshot directories; `--max-total`
+  bounds the aggregate size by deleting the oldest rotated copies
+  first; `--keep` is a per-base-name floor that protects the newest
+  N copies. Explicit-only: with no flags the file system is never
+  touched. Surfaced as `talaria hermes log-rotate`.
 - `sync_env.py` — refresh a single profile's `.env` values from the live
   process environment (`os.environ`). Never adds new keys by default;
   opt-in `add_keys` / `--add-key` appends named keys from the environment;

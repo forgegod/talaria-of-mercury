@@ -70,6 +70,18 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   by its listening port (profile-agnostic, Linux-only). It takes `--port`,
   `--dry-run`, `--json`, and `--show-resolution`. `--profile` is recorded in
   the report only and does not affect detection.
+- `talaria hermes log-rotate` rotates and prunes the active profile's
+  `logs/` (or every profile's `logs/` with `--all-profiles`). It takes
+  `--max-size BYTES` (per-file cap on the gzipped payload, applied via
+  `copy → gzip → truncate`), `--max-age DAYS` (delete rotated copies
+  and `logs/curator/<ts>/` directories older than the threshold),
+  `--max-total BYTES` (bound the aggregate directory size by
+  deleting the oldest rotated copies first), `--keep N` (per-base-name
+  floor that protects the newest N rotated copies), `--dry-run`,
+  `--json`, `--show-resolution`, and `--profile`. The tool is
+  explicit-only: with no prune/rotate flags the file system is never
+  touched regardless of `--dry-run`. `--all-profiles` sweeps the
+  root `~/.hermes/logs/` plus every `~/.hermes/profiles/*/logs/`.
 - `talaria completion` delegates to `talaria.cli.completion`, which walks the
   live `build_parser()` tree at invocation time and emits a static bash/zsh
   script. Architectural note: completion is coupled to the CLI parameter
