@@ -39,10 +39,37 @@ background so it can be placed on any surface.
     - `logo.svg` — horizontal lockup (glyph + TALARIA wordmark).
     - `logo-mark.svg` — square standalone mark (glyph only, SVG).
 
-  No drafts, no grid variants, no alternate geometries.  If a
+  No grid variants, no alternate production geometries.  If a
   future redesign is requested, propose changes to
   `build_logo.py` as a single revision; do not reintroduce a
-  drafts/ subdirectory or multi-variant generator.
+  multi-variant generator for production.
+
+- **Hallux variants (operator inspection, 2026-07-04)** — the
+  glyph path generator supports four hallux variants, selectable
+  via `python3 build_logo.py --variant NAME` or
+  `hallux_variant=NAME` passed through `render_glyph()` /
+  `render_lockup()` / `render_mark_only()`.  Default is
+  `"a-outer-small"` (the production geometry):
+    - `"a-outer-small"` — PRODUCTION default.  Small outer
+      toe-knob, ~12u × ~7u past the outer end of the base bar
+      on BOTH sides (mirrored).  Amber band stays clean.
+    - `"none"` — No hallux (the pre-2026-07-04 production
+      geometry).  Kept as a comparison reference only.
+    - `"b-outer-large"` — Larger outer toe-blob, ~22u × ~14u,
+      dipping 4u below the sole.  Reference only.
+    - `"c-inner-medial"` — Inner hallux on the medial side
+      (toward the centreline), ~12u × ~6u.  The two halluces
+      meet at the centreline, creating a small notch in the
+      amber ribbon where the toes kiss.  Reference only.
+
+  `--drafts` writes the four comparison sets
+  (`none` + `a-outer-small` + `b-outer-large` +
+  `c-inner-medial`) under `assets/drafts/` for operator
+  inspection.  `--drafts` does NOT touch the canonical
+  `logo.svg` / `logo-mark.svg`.  This inspection workflow is
+  the documented exception to the "no drafts" rule above —
+  the `drafts/` directory is the inspection output, not an
+  alternate production set.
 
 - **Intentional "error" — no perfect band-to-baseline alignment**
   — the amber ribbon on the glyph's lower feathers does NOT
@@ -86,7 +113,13 @@ background so it can be placed on any surface.
   base bar are ONE integral piece — the base bar is part of the
   wing path, not a separate `<rect>`.  There is NO pedestal
   between the wings and the base bar — the lower feathers taper
-  smoothly into the bar with no visible flat edge or seam.  Path
+  smoothly into the bar with no visible flat edge or seam.  The
+  production geometry also includes a small outer hallux (toe-
+  knob) on each end of the base bar — a ~12u × ~7u rounded
+  protrusion past `x=22` (left) and `x=218` (right), implemented
+  as a cubic-Bézier toe curve appended to the Q-curve → bar
+  bottom → centreline trail.  See "Hallux variants" above for
+  the variant selector and the alternative geometries.  Path
   data is in `_solid_3_paths()` (also returns the base bar
   geometry) in `build_logo.py`.  The standalone mark uses the
   same path data and the same combined-silhouette structure.
@@ -162,21 +195,34 @@ background so it can be placed on any surface.
   primary lockup (transparent background).  Glyph is the
   `solid_3` winged-sandal: a single closed `<path>` per side
   that flows 3 feathers down into the base bar as one integral
-  piece.  Gold wings + thin amber ribbon overlay (clipPath) at
-  glyph-local y=150..180 (height = `GLYPH_BAND_HEIGHT = 30`
-  units).  The lockup ribbon and the wordmark band sit on the
-  same y line (lockup y=157..187); the lockup derives the band
-  from cap-derived math, the wordmark uses the same constants.
-  The intentional asymmetric notch at the wing's outer corner
-  (where the lower feather dips below the band's lower edge)
-  is a load-bearing design feature — see "Intentional 'error'"
+  piece, with a small outer hallux (toe-knob) on each end of
+  the base bar.  Gold wings + thin amber ribbon overlay
+  (clipPath) at glyph-local y=150..180 (height =
+  `GLYPH_BAND_HEIGHT = 30` units).  The lockup ribbon and the
+  wordmark band sit on the same y line (lockup y=157..187);
+  the lockup derives the band from cap-derived math, the
+  wordmark uses the same constants.  The intentional
+  asymmetric notch at the wing's outer corner (where the
+  lower feather dips below the band's lower edge) is a
+  load-bearing design feature — see "Intentional 'error'"
   in Local Contracts above.  The base bar bottom sits on the
-  wordmark baseline.
+  wordmark baseline.  Built from
+  `python3 build_logo.py` (default = `a-outer-small`).
 - `logo-mark.svg` — square mark only (transparent background,
   SVG-only — no raster children).  Uses the same `solid_3`
-  winged-sandal glyph with the same `GLYPH_BAND_TOP_LOCAL` /
-  `GLYPH_BAND_HEIGHT` as the lockup ribbon.  Same intentional
-  outer-corner notch as the lockup.
+  winged-sandal glyph (with hallux) and the same
+  `GLYPH_BAND_TOP_LOCAL` / `GLYPH_BAND_HEIGHT` as the lockup
+  ribbon.  Same intentional outer-corner notch as the
+  lockup.  Built from `python3 build_logo.py` (default =
+  `a-outer-small`).
 - `build_logo.py` — SVG source generator (single source of
   truth).  Generates `logo.svg` and `logo-mark.svg` from the
-  geometry constants at the top of the file.
+  geometry constants at the top of the file.  CLI: `python3
+  build_logo.py [--variant NAME] [--drafts]`.  See "Hallux
+  variants" under Local Contracts above for the variant list
+  and the `--drafts` inspection workflow.
+- `drafts/` — operator-inspection output of `python3
+  build_logo.py --drafts`.  Contains four lockup+mark pairs
+  (no-hallux + the three hallux variants) for side-by-side
+  comparison.  Generated, NOT committed.  The canonical
+  `logo.svg` / `logo-mark.svg` are not touched by `--drafts`.
