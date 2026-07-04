@@ -28,6 +28,15 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   `config`: single-profile alias derivation. It takes `--profile` /
   `--config-path` and the standard write-feature flags
   (`--dry-run`, `--no-backup`, `--json`, `--show-resolution`).
+- `talaria config sync-env` is the third sibling under `config`:
+  single-profile `.env` value refresh from the live process
+  environment. It takes `--profile` / `--env-path` and the standard
+  write-feature flags. Existing target keys get their values
+  overwritten from `os.environ`; four optional repeatable flags
+  extend the variable scope: `--add-key` appends a new key from the
+  environment, `--skip-key` excludes a key from the refresh,
+  `--disable-key` comments a key out, and `--enable-key` uncomments
+  a previously disabled key.
 
 ## Work Guidance
 

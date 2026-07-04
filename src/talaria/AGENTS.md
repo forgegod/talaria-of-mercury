@@ -21,6 +21,9 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   Write-bearing carve-outs are explicit: `talaria config sync` copies profile
   artefacts between profiles, `talaria config apply-auxiliary` derives
   `model.aliases` from a profile's `auxiliary` block,
+  `talaria config sync-env` refreshes a profile's `.env` values from the
+  live environment and can optionally extend the variable scope
+  (`--add-key`, `--skip-key`, `--disable-key`, `--enable-key`),
   `talaria hermes fix-context-cache` repairs `context_length_cache.yaml`
   in one profile, and `talaria hermes install-skills-recursive` installs
   third-party skills then updates that profile's `skills.disabled` policy.

@@ -33,6 +33,34 @@ caches.
   libproc on macOS, NT APIs on Windows) behind one cross-platform call.
   It does not read `state.db`, `logs/`, or any profile artefact.
   `--profile` is recorded in the report only.
+- `sync_env` is profile-scoped by design — it refreshes the selected
+  profile's `.env` values from the live process environment
+  (`os.environ`). For every `KEY=...` line already present in the
+  target file, the value is overwritten with the matching environment
+  value. Keys absent from the file are **never added by default** (the
+  file's variable set is the operator-defined scope). Four opt-in,
+  orthogonal, repeatable key operations change this:
+
+  * `add_keys` / `--add-key` — append a named key that is absent from
+    the file and present in the environment with a non-empty value.
+    Keys already present (active or disabled) are never re-added.
+  * `skip_keys` / `--skip-key` — keep a key out of the env-value
+    refresh; its file value is preserved as-is.
+  * `disable_keys` / `--disable-key` — comment out an active
+    assignment (`KEY=value` → `#KEY=value`). The `export` prefix is
+    dropped from the commented form. Disabled keys are hidden from the
+    refresh scan and keep their value while inactive.
+  * `enable_keys` / `--enable-key` — uncomment a previously disabled
+    assignment (`#KEY=value` → `KEY=value`). The stored value is
+    restored verbatim; the key is not refreshed from the environment
+    on the same run.
+
+  All four are processed in a single line scan; each original line is
+  touched at most once. With none of them the behaviour is identical
+  to the value-only refresh. Empty environment values leave the file
+  value untouched (refresh) or skip the key (add). Writes go through
+  the atomic backup writer. This supersedes the retired
+  `~/.config/shell/sync-secrets.sh` shell helper.
 
 ## Local Contracts
 
@@ -69,6 +97,27 @@ caches.
   based — the latter is exactly what `hermes serve --stop` does and it
   misses backends launched with a global flag between module and
   subcommand (e.g. `-p default dashboard`).
+- `sync_env` reports use `ok: bool` and `changed: bool`. Fields:
+  `updated` (list of `{key, old, new}`), `unchanged` (list of keys),
+  `absent` (keys in the file but missing from the environment), `added`
+  (list of `{key, value}` newly appended via `add_keys`), `add_skipped`
+  (`{key, reason}` — `already-present | already-disabled | not-in-env |
+  empty-value | invalid-name`), `skipped` (list of keys excluded from
+  refresh via `skip_keys`), `skip_skipped` (`{key, reason}` — `not-found
+  | invalid-name`), `disabled` (list of keys commented out),
+  `disable_skipped` (`{key, reason}` — `already-disabled | not-found |
+  invalid-name`), `enabled` (list of keys uncommented), `enable_skipped`
+  (`{key, reason}` — `not-disabled | invalid-name`). `changed` is true
+  only when bytes change (updated, added, disabled, or enabled); skipped
+  keys never count as a change. Writes go through the same atomic backup
+  writer used by sync and `auxiliary`. `--dry-run` must not write a
+  `.env` or backup. The `export` prefix on matching lines is preserved
+  on refresh and dropped on disable; comments and blank lines are
+  preserved verbatim. Values are **never** echoed in `show_resolution`
+  output (only key names) to avoid leaking secrets. When `add_keys`
+  adds keys and the target file does not exist, the file is created
+  with the added lines; when no key is addable and the file is missing,
+  it stays a no-op.
 
 ## Work Guidance
 
@@ -107,6 +156,31 @@ caches.
   SIGTERM→SIGKILL escalation, ProcessLookup/Permission handling,
   `_pid_alive` psutil fallback, renderer verdicts, and CLI
   --help/--show-resolution/--json. psutil is mocked via monkeypatch.
+- `sync_env` tests cover value refresh from env, no-add-by-default
+  semantics (absent keys never written unless `add_keys` is passed),
+  `export` prefix preservation, comment/blank preservation,
+  empty-env-value skip (refresh and add), absent-from-env listing,
+  dry-run suppression, default backup creation, `--no-backup`,
+  missing-file no-op, idempotency, profile path resolution,
+  explicit-path override, `show_resolution` shape, and CLI
+  --help/--json/--dry-run/--show-resolution. The `add_keys` / `--add-key`
+  tests cover append-from-env, add+refresh in one run, already-present
+  skip, not-in-env skip, empty-value skip, invalid-name skip,
+  duplicate collapse, missing-file creation, missing-file no-op when
+  nothing is addable, dry-run suppression, default backup, default
+  no-add backward compatibility, trailing-newline separation of the
+  appended block, `run()` forwarding, and `show_resolution`
+  `would_add`/`add_skipped` shape, plus CLI `--add-key` append,
+  repeatable, and not-in-env cases. The `skip_keys` / `--skip-key`,
+  `disable_keys` / `--disable-key`, and `enable_keys` / `--enable-key`
+  tests cover value preservation, export-prefix drop on disable,
+  verbatim restore on enable (not env-refreshed), not-found /
+  already-disabled / not-disabled skip reasons, invalid-name skip,
+  plain-comment non-match, dry-run suppression, default backup,
+  `run()` forwarding, disable→enable roundtrip, combined operations
+  in one run, `show_resolution` `would_skip`/`would_disable`/
+  `would_enable` shape, and CLI `--skip-key`/`--disable-key`/
+  `--enable-key`.
 
 ## Child DOX Index
 
@@ -123,3 +197,9 @@ caches.
   `talaria config apply-auxiliary`.
 - `serve_stop.py` — detect and gracefully stop the Hermes dashboard/serve
   backend by its listening port. Profile-agnostic; cross-platform via psutil.
+- `sync_env.py` — refresh a single profile's `.env` values from the live
+  process environment (`os.environ`). Never adds new keys by default;
+  opt-in `add_keys` / `--add-key` appends named keys from the environment;
+  `--skip-key` excludes keys from refresh; `--disable-key` comments out
+  assignments; `--enable-key` uncomments them. Surfaced as
+  `talaria config sync-env`.

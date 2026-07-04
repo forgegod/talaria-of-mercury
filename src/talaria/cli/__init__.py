@@ -296,6 +296,39 @@ def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def cmd_config_sync_env(args: argparse.Namespace) -> int:
+    from talaria.hermos import sync_env
+
+    paths = resolve_paths(profile_flag=args.profile)
+    env_file = Path(args.env_path) if args.env_path else None
+    add_keys = args.add_key or None
+    skip_keys = args.skip_key or None
+    disable_keys = args.disable_key or None
+    enable_keys = args.enable_key or None
+    if args.show_resolution:
+        print(sync_env.show_resolution(
+            paths, env_file=env_file, add_keys=add_keys, skip_keys=skip_keys,
+            disable_keys=disable_keys, enable_keys=enable_keys,
+        ))
+        return 0
+    report = sync_env.run(
+        paths,
+        env_file=env_file,
+        apply=not args.dry_run,
+        no_backup=args.no_backup,
+        add_keys=add_keys,
+        skip_keys=skip_keys,
+        disable_keys=disable_keys,
+        enable_keys=enable_keys,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    exit_code, text = sync_env.render_human(report)
+    print(text)
+    return exit_code
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="talaria",
@@ -531,11 +564,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     # talaria config ...
     config_grp = sub.add_parser(
-        "config", help="Configuration maintenance: sync profiles and derive aliases.",
+        "config", help="Configuration maintenance: sync profiles, derive aliases, refresh .env values.",
         description=(
             "Configuration maintenance commands. sync copies profile "
             "artefacts between two profiles; apply-auxiliary derives "
-            "model.aliases from a single profile's auxiliary block."
+            "model.aliases from a single profile's auxiliary block; "
+            "sync-env refreshes a single profile's .env values from the "
+            "current process environment, and can optionally extend the "
+            "file's variable scope with --add-key (no new variables "
+            "added by default)."
         ),
     )
     config_sub = config_grp.add_subparsers(dest="config_command", required=True, metavar="COMMAND")
@@ -649,6 +686,68 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the resolved config path and the aliases that would be derived, then exit.",
     )
     p_auxiliary.set_defaults(func=cmd_config_apply_auxiliary)
+
+    # talaria config sync-env
+    p_sync_env = config_sub.add_parser(
+        "sync-env",
+        help="Refresh a profile's .env values from the current environment.",
+        description=(
+            "Update the selected profile's .env by overwriting the value "
+            "of every variable that already exists in the file with its "
+            "current value from the process environment. Variables absent "
+            "from the .env are never added — the file keeps the exact "
+            "variable set the operator defined, only values are refreshed."
+        ),
+    )
+    p_sync_env.add_argument(
+        "--profile", help="Hermes profile whose .env should be refreshed.",
+    )
+    p_sync_env.add_argument(
+        "--env-path", type=Path, default=None,
+        help="Explicit .env path (overrides --profile resolution).",
+    )
+    p_sync_env.add_argument(
+        "--add-key", action="append", default=None, metavar="KEY", dest="add_key",
+        help="Append KEY to the .env (with its value from the current "
+             "environment) if it is absent. Repeatable. Keys already in "
+             "the file are left to the normal refresh path. Pass to extend "
+             "the profile's variable scope; without it, only existing "
+             "values are refreshed.",
+    )
+    p_sync_env.add_argument(
+        "--skip-key", action="append", default=None, metavar="KEY", dest="skip_key",
+        help="Keep KEY out of the env-value refresh on this run: its file "
+             "value is preserved as-is even when the environment has a "
+             "different value. Repeatable.",
+    )
+    p_sync_env.add_argument(
+        "--disable-key", action="append", default=None, metavar="KEY", dest="disable_key",
+        help="Comment out KEY (KEY=value becomes #KEY=value). Repeatable. "
+             "Disabled keys are hidden from the refresh scan and keep "
+             "their value while inactive. Reversible with --enable-key.",
+    )
+    p_sync_env.add_argument(
+        "--enable-key", action="append", default=None, metavar="KEY", dest="enable_key",
+        help="Uncomment a previously disabled KEY (#KEY=value becomes "
+             "KEY=value). Repeatable. The restored value is kept verbatim; "
+             "KEY is not refreshed from the environment on the same run.",
+    )
+    p_sync_env.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview which variables would change without writing.",
+    )
+    p_sync_env.add_argument(
+        "--no-backup", action="store_true",
+        help="Skip .bak backup before overwriting .env.",
+    )
+    p_sync_env.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_sync_env.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print the resolved .env path and which keys would be updated, then exit.",
+    )
+    p_sync_env.set_defaults(func=cmd_config_sync_env)
 
     return p
 
