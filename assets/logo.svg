@@ -1,68 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1044 366" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1548 284" role="img" aria-labelledby="title">
   <title id="title">Talaria — winged sandals for the Hermes Agent</title>
-  <rect x="136" y="40" width="22" height="22" fill="#000"/>
-  <rect x="158" y="40" width="22" height="22" fill="#000"/>
-  <rect x="114" y="62" width="22" height="22" fill="#000"/>
-  <rect x="136" y="62" width="22" height="22" fill="#000"/>
-  <rect x="158" y="62" width="22" height="22" fill="#000"/>
-  <rect x="180" y="62" width="22" height="22" fill="#000"/>
-  <rect x="92" y="84" width="22" height="22" fill="#000"/>
-  <rect x="114" y="84" width="22" height="22" fill="#000"/>
-  <rect x="136" y="84" width="22" height="22" fill="#000"/>
-  <rect x="158" y="84" width="22" height="22" fill="#000"/>
-  <rect x="180" y="84" width="22" height="22" fill="#000"/>
-  <rect x="202" y="84" width="22" height="22" fill="#000"/>
-  <rect x="70" y="106" width="22" height="22" fill="#000"/>
-  <rect x="92" y="106" width="22" height="22" fill="#000"/>
-  <rect x="114" y="106" width="22" height="22" fill="#000"/>
-  <rect x="136" y="106" width="22" height="22" fill="#000"/>
-  <rect x="158" y="106" width="22" height="22" fill="#000"/>
-  <rect x="180" y="106" width="22" height="22" fill="#000"/>
-  <rect x="202" y="106" width="22" height="22" fill="#000"/>
-  <rect x="224" y="106" width="22" height="22" fill="#000"/>
-  <rect x="48" y="128" width="22" height="22" fill="#000"/>
-  <rect x="70" y="128" width="22" height="22" fill="#000"/>
-  <rect x="92" y="128" width="22" height="22" fill="#000"/>
-  <rect x="114" y="128" width="22" height="22" fill="#000"/>
-  <rect x="136" y="128" width="22" height="22" fill="#000"/>
-  <rect x="158" y="128" width="22" height="22" fill="#000"/>
-  <rect x="180" y="128" width="22" height="22" fill="#000"/>
-  <rect x="202" y="128" width="22" height="22" fill="#000"/>
-  <rect x="224" y="128" width="22" height="22" fill="#000"/>
-  <rect x="246" y="128" width="22" height="22" fill="#000"/>
-  <rect x="70" y="150" width="22" height="22" fill="#000"/>
-  <rect x="92" y="150" width="22" height="22" fill="#000"/>
-  <rect x="114" y="150" width="22" height="22" fill="#000"/>
-  <rect x="136" y="150" width="22" height="22" fill="#000"/>
-  <rect x="158" y="150" width="22" height="22" fill="#000"/>
-  <rect x="180" y="150" width="22" height="22" fill="#000"/>
-  <rect x="202" y="150" width="22" height="22" fill="#000"/>
-  <rect x="224" y="150" width="22" height="22" fill="#000"/>
-  <rect x="92" y="172" width="22" height="22" fill="#000"/>
-  <rect x="114" y="172" width="22" height="22" fill="#000"/>
-  <rect x="136" y="172" width="22" height="22" fill="#000"/>
-  <rect x="158" y="172" width="22" height="22" fill="#000"/>
-  <rect x="180" y="172" width="22" height="22" fill="#000"/>
-  <rect x="202" y="172" width="22" height="22" fill="#000"/>
-  <rect x="114" y="194" width="22" height="22" fill="#000"/>
-  <rect x="136" y="194" width="22" height="22" fill="#000"/>
-  <rect x="158" y="194" width="22" height="22" fill="#000"/>
-  <rect x="180" y="194" width="22" height="22" fill="#000"/>
-  <rect x="48" y="282" width="22" height="22" fill="#000"/>
-  <rect x="70" y="282" width="22" height="22" fill="#000"/>
-  <rect x="92" y="282" width="22" height="22" fill="#000"/>
-  <rect x="114" y="282" width="22" height="22" fill="#000"/>
-  <rect x="136" y="282" width="22" height="22" fill="#000"/>
-  <rect x="158" y="282" width="22" height="22" fill="#000"/>
-  <rect x="180" y="282" width="22" height="22" fill="#000"/>
-  <rect x="202" y="282" width="22" height="22" fill="#000"/>
-  <rect x="224" y="282" width="22" height="22" fill="#000"/>
-  <rect x="246" y="282" width="22" height="22" fill="#000"/>
-  <rect x="92" y="304" width="22" height="22" fill="#000"/>
-  <rect x="114" y="304" width="22" height="22" fill="#000"/>
-  <rect x="136" y="304" width="22" height="22" fill="#000"/>
-  <rect x="158" y="304" width="22" height="22" fill="#000"/>
-  <rect x="180" y="304" width="22" height="22" fill="#000"/>
-  <rect x="202" y="304" width="22" height="22" fill="#000"/>
-  <text x="324" y="224.0" font-family="Georgia, 'Times New Roman', serif" font-size="116" font-weight="700" letter-spacing="6" fill="#000">TALARIA</text>
+  <!-- solid_3 winged-sandal glyph (band-aligned) -->
+  <defs>
+    <clipPath id="talaria-glyph-band">
+      <rect x="0" y="145.292800" width="240" height="43.545600"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(64 7)">
+    <path d="M 120 70 C 90 30, 50 22, 22 50 C 38 60, 60 65, 78 70 C 50 70, 18 82, 12 110 C 38 100, 64 95, 80 92 C 50 102, 24 120, 22 150 C 50 145, 70 138, 84 130 Q 60 164, 22 170 L 22 184 L 120 184 Z" fill="#ffc72c"/>
+    <path d="M 120 70 C 150 30, 190 22, 218 50 C 202 60, 180 65, 162 70 C 190 70, 222 82, 228 110 C 202 100, 176 95, 160 92 C 190 102, 216 120, 218 150 C 190 145, 170 138, 156 130 Q 180 164, 218 170 L 218 184 L 120 184 Z" fill="#ffc72c"/>
+  </g>
+  <g transform="translate(64 7)" clip-path="url(#talaria-glyph-band)">
+    <path d="M 120 70 C 90 30, 50 22, 22 50 C 38 60, 60 65, 78 70 C 50 70, 18 82, 12 110 C 38 100, 64 95, 80 92 C 50 102, 24 120, 22 150 C 50 145, 70 138, 84 130 Q 60 164, 22 170 L 22 184 L 120 184 Z" fill="#f9a23a"/>
+    <path d="M 120 70 C 150 30, 190 22, 218 50 C 202 60, 180 65, 162 70 C 190 70, 222 82, 228 110 C 202 100, 176 95, 160 92 C 190 102, 216 120, 218 150 C 190 145, 170 138, 156 130 Q 180 164, 218 170 L 218 184 L 120 184 Z" fill="#f9a23a"/>
+  </g>
+
+  <!-- TALARIA wordmark -->
+  <defs>
+    <clipPath id="talaria-band-clip">
+      <text x="384" y="191" font-family="Georgia, 'Times New Roman', serif" font-size="168" font-weight="700" letter-spacing="12">TALARIA</text>
+    </clipPath>
+  </defs>
+  <text x="384" y="191" font-family="Georgia, 'Times New Roman', serif" font-size="168" font-weight="700" letter-spacing="12" fill="#ffc72c">TALARIA</text>
+  <rect x="380" y="152.2928" width="1100" height="43.54559999999999" fill="#f9a23a" clip-path="url(#talaria-band-clip)"/>
+
 </svg>

@@ -1,67 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 276 342" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 336 280" role="img" aria-labelledby="title">
   <title id="title">Talaria mark</title>
-  <rect x="116" y="28" width="22" height="22" fill="#000"/>
-  <rect x="138" y="28" width="22" height="22" fill="#000"/>
-  <rect x="94" y="50" width="22" height="22" fill="#000"/>
-  <rect x="116" y="50" width="22" height="22" fill="#000"/>
-  <rect x="138" y="50" width="22" height="22" fill="#000"/>
-  <rect x="160" y="50" width="22" height="22" fill="#000"/>
-  <rect x="72" y="72" width="22" height="22" fill="#000"/>
-  <rect x="94" y="72" width="22" height="22" fill="#000"/>
-  <rect x="116" y="72" width="22" height="22" fill="#000"/>
-  <rect x="138" y="72" width="22" height="22" fill="#000"/>
-  <rect x="160" y="72" width="22" height="22" fill="#000"/>
-  <rect x="182" y="72" width="22" height="22" fill="#000"/>
-  <rect x="50" y="94" width="22" height="22" fill="#000"/>
-  <rect x="72" y="94" width="22" height="22" fill="#000"/>
-  <rect x="94" y="94" width="22" height="22" fill="#000"/>
-  <rect x="116" y="94" width="22" height="22" fill="#000"/>
-  <rect x="138" y="94" width="22" height="22" fill="#000"/>
-  <rect x="160" y="94" width="22" height="22" fill="#000"/>
-  <rect x="182" y="94" width="22" height="22" fill="#000"/>
-  <rect x="204" y="94" width="22" height="22" fill="#000"/>
-  <rect x="28" y="116" width="22" height="22" fill="#000"/>
-  <rect x="50" y="116" width="22" height="22" fill="#000"/>
-  <rect x="72" y="116" width="22" height="22" fill="#000"/>
-  <rect x="94" y="116" width="22" height="22" fill="#000"/>
-  <rect x="116" y="116" width="22" height="22" fill="#000"/>
-  <rect x="138" y="116" width="22" height="22" fill="#000"/>
-  <rect x="160" y="116" width="22" height="22" fill="#000"/>
-  <rect x="182" y="116" width="22" height="22" fill="#000"/>
-  <rect x="204" y="116" width="22" height="22" fill="#000"/>
-  <rect x="226" y="116" width="22" height="22" fill="#000"/>
-  <rect x="50" y="138" width="22" height="22" fill="#000"/>
-  <rect x="72" y="138" width="22" height="22" fill="#000"/>
-  <rect x="94" y="138" width="22" height="22" fill="#000"/>
-  <rect x="116" y="138" width="22" height="22" fill="#000"/>
-  <rect x="138" y="138" width="22" height="22" fill="#000"/>
-  <rect x="160" y="138" width="22" height="22" fill="#000"/>
-  <rect x="182" y="138" width="22" height="22" fill="#000"/>
-  <rect x="204" y="138" width="22" height="22" fill="#000"/>
-  <rect x="72" y="160" width="22" height="22" fill="#000"/>
-  <rect x="94" y="160" width="22" height="22" fill="#000"/>
-  <rect x="116" y="160" width="22" height="22" fill="#000"/>
-  <rect x="138" y="160" width="22" height="22" fill="#000"/>
-  <rect x="160" y="160" width="22" height="22" fill="#000"/>
-  <rect x="182" y="160" width="22" height="22" fill="#000"/>
-  <rect x="94" y="182" width="22" height="22" fill="#000"/>
-  <rect x="116" y="182" width="22" height="22" fill="#000"/>
-  <rect x="138" y="182" width="22" height="22" fill="#000"/>
-  <rect x="160" y="182" width="22" height="22" fill="#000"/>
-  <rect x="28" y="270" width="22" height="22" fill="#000"/>
-  <rect x="50" y="270" width="22" height="22" fill="#000"/>
-  <rect x="72" y="270" width="22" height="22" fill="#000"/>
-  <rect x="94" y="270" width="22" height="22" fill="#000"/>
-  <rect x="116" y="270" width="22" height="22" fill="#000"/>
-  <rect x="138" y="270" width="22" height="22" fill="#000"/>
-  <rect x="160" y="270" width="22" height="22" fill="#000"/>
-  <rect x="182" y="270" width="22" height="22" fill="#000"/>
-  <rect x="204" y="270" width="22" height="22" fill="#000"/>
-  <rect x="226" y="270" width="22" height="22" fill="#000"/>
-  <rect x="72" y="292" width="22" height="22" fill="#000"/>
-  <rect x="94" y="292" width="22" height="22" fill="#000"/>
-  <rect x="116" y="292" width="22" height="22" fill="#000"/>
-  <rect x="138" y="292" width="22" height="22" fill="#000"/>
-  <rect x="160" y="292" width="22" height="22" fill="#000"/>
-  <rect x="182" y="292" width="22" height="22" fill="#000"/>
+  <defs>
+    <clipPath id="talaria-glyph-band">
+      <rect x="0" y="104.292800" width="240" height="43.545600"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(48 48)">
+    <path d="M 120 70 C 90 30, 50 22, 22 50 C 38 60, 60 65, 78 70 C 50 70, 18 82, 12 110 C 38 100, 64 95, 80 92 C 50 102, 24 120, 22 150 C 50 145, 70 138, 84 130 Q 60 164, 22 170 L 22 184 L 120 184 Z" fill="#ffc72c"/>
+    <path d="M 120 70 C 150 30, 190 22, 218 50 C 202 60, 180 65, 162 70 C 190 70, 222 82, 228 110 C 202 100, 176 95, 160 92 C 190 102, 216 120, 218 150 C 190 145, 170 138, 156 130 Q 180 164, 218 170 L 218 184 L 120 184 Z" fill="#ffc72c"/>
+  </g>
+  <g transform="translate(48 48)" clip-path="url(#talaria-glyph-band)">
+    <path d="M 120 70 C 90 30, 50 22, 22 50 C 38 60, 60 65, 78 70 C 50 70, 18 82, 12 110 C 38 100, 64 95, 80 92 C 50 102, 24 120, 22 150 C 50 145, 70 138, 84 130 Q 60 164, 22 170 L 22 184 L 120 184 Z" fill="#f9a23a"/>
+    <path d="M 120 70 C 150 30, 190 22, 218 50 C 202 60, 180 65, 162 70 C 190 70, 222 82, 228 110 C 202 100, 176 95, 160 92 C 190 102, 216 120, 218 150 C 190 145, 170 138, 156 130 Q 180 164, 218 170 L 218 184 L 120 184 Z" fill="#f9a23a"/>
+  </g>
+
 </svg>
