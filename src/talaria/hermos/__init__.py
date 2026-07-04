@@ -1,17 +1,24 @@
 """Hermes-specific Talaria features.
 
 Each module under this package implements a single feature that operates
-on Hermes' ``state.db`` and ``logs/`` directory. The MoA truncation
-check is the first feature.
+on Hermes' ``state.db`` and ``logs/`` directory, or performs narrowly
+scoped maintenance on a single profile's configuration artefacts.
 """
 
 from __future__ import annotations
 
 from talaria.hermos import (
+    auxiliary,
     context_cache_fix,
     moa_truncation,
     refresh_catalog,
     skill_install,
 )
 
-__all__ = ["context_cache_fix", "moa_truncation", "refresh_catalog", "skill_install"]
+__all__ = [
+    "auxiliary",
+    "context_cache_fix",
+    "moa_truncation",
+    "refresh_catalog",
+    "skill_install",
+]

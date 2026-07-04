@@ -8,8 +8,9 @@ Pytest suite for the Talaria CLI and library.
 
 - One test module per feature: `test_paths.py` for path resolution,
   `test_moa_truncation.py`, `test_refresh_catalog.py`,
-  `test_context_cache_fix.py`, and `test_sync.py` for feature coverage.
-  `test_skill_install.py` covers recursive skill install orchestration.
+  `test_context_cache_fix.py`, `test_auxiliary.py`, and `test_sync.py`
+  for feature coverage. `test_skill_install.py` covers recursive skill
+  install orchestration.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
   `_helpers.py` (importable, not auto-discovered by pytest).
 
@@ -46,6 +47,9 @@ Pytest suite for the Talaria CLI and library.
   freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.
 - `test_context_cache_fix.py` — curated context-length cache repairs,
   backups, dry-run behaviour, and CLI profile/path resolution.
+- `test_auxiliary.py` — single-profile auxiliary-alias derivation:
+  injection, sentinel skipping, preservation, no-op, idempotency,
+  dry-run, profile path resolution, CLI flags.
 - `test_skill_install.py` — recursive skill identifier expansion, install
   policy updates, dry-run behaviour, and CLI flag coverage.
 - `test_sync.py` — sync phases (config, soul, skills, env,

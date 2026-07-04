@@ -63,6 +63,7 @@ class SyncOptions:
     skip_skills: bool = False
     skip_env: bool = False
     skip_cache: bool = False
+    force_config: bool = False
 
 
 def run_sync(
@@ -116,6 +117,7 @@ def run_sync(
             mcp_serve_host=options.mcp_serve_host,
             apply=apply,
             no_backup=options.no_backup,
+            force=options.force_config,
         )
 
     if not options.skip_soul:

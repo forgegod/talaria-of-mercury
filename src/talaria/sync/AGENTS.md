@@ -13,8 +13,10 @@ profiles.
 
 ## Ownership
 
-- This package is its own feature group — `talaria sync` is the
-  single CLI entry point. There is no nested subcommand hierarchy.
+- This package is its own feature group — `talaria config sync` is
+  the CLI entry point that drives it. The `config` command group
+  also hosts the sibling `apply-auxiliary` command (implemented in
+  `talaria/hermos/auxiliary.py`, not here).
 - Each phase is a single module: `config.py`, `soul.py`,
   `skills.py`, `env.py`, `context_cache.py`, `mcp_serve.py`. Phases
   are independent and any subset can run via `--skip-*` flags.

@@ -16,7 +16,7 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 - **Structured JSON output** for cron, dashboards, and other agents.
 - **Reusable feature layout** — adding a new maintenance check is a new module under `talaria.hermos` or a sync phase under `talaria.sync`, not a top-level script.
 - **Zero network dependencies for inspection features.** Read-only features (e.g. `moa-truncation`) never talk to the network. Network-aware maintenance commands (`refresh-catalog`, `install-skills-recursive`) fetch external catalog or skill metadata before writing profile artefacts.
-- **Write-bearing `talaria sync`.** The inspection features never modify `state.db` or logs; the `sync` feature group is the deliberate carve-out that copies profile *configuration* artefacts (config.yaml, SOUL.md, skills/, .env, context cache) between profiles.
+- **Write-bearing `talaria config`.** The inspection features never modify `state.db` or logs; the `config` command group is the deliberate carve-out that copies profile *configuration* artefacts (config.yaml, SOUL.md, skills/, .env, context cache) between profiles and derives `model.aliases` from a profile's `auxiliary` block.
 
 ## Features at a glance
 
@@ -26,7 +26,8 @@ Hermes Agent stores session telemetry in a per-profile SQLite database and rotat
 | `talaria hermes moa-truncation`  | `state.db`, `agent.log`, `errors.log`| Verify the MoA truncation mitigation (Signal A + Signal B).   |
 | `talaria hermes refresh-catalog` | selected gateway + XDG cache         | Refresh and reshape a gateway-backed model manifest.         |
 | `talaria hermes install-skills-recursive` | GitHub tree + profile config | Install every child skill under `.../*` and set enable policy. |
-| `talaria sync`                   | two profiles (or file paths)         | Copy config.yaml, SOUL.md, skills/, .env, context cache between profiles. |
+| `talaria config sync`             | two profiles (or file paths)         | Copy config.yaml, SOUL.md, skills/, .env, context cache between profiles. |
+| `talaria config apply-auxiliary`  | one profile config.yaml              | Derive `model.aliases._<usecase>` from the profile's `auxiliary` block. |
 
 Each feature has its own dedicated section below with usage, flags, output schema, and exit codes.
 
@@ -310,44 +311,44 @@ After installation, Talaria writes `skills.disabled` in the selected profile con
 | `0`  | Expansion, installs, and config policy passed. |
 | `2`  | Tool error — expansion, install, or write failed. |
 
-## Feature: `talaria sync`
+## Feature: `talaria config sync`
 
 Copy Hermes profile artefacts (config.yaml, SOUL.md, skills/, .env,
-context_length_cache.yaml) from one profile to another. **Sync is the
-write-bearing feature group** — every other Talaria command is
-read-only against the Hermes runtime. Sync never touches `state.db`
-or rotates logs; it copies the *configuration* artefacts that
-determine which profile a Hermes session runs under.
+context_length_cache.yaml) from one profile to another. **sync is the
+write-bearing command** — every other Talaria command is read-only
+against the Hermes runtime. sync never touches `state.db` or rotates
+logs; it copies the *configuration* artefacts that determine which
+profile a Hermes session runs under.
 
 ### Usage
 
 ```bash
 # Sync every phase from default to hermes-vc (writes by default)
-talaria sync default hermes-vc
+talaria config sync default hermes-vc
 
 # Preview without writing
-talaria sync default hermes-vc --dry-run
+talaria config sync default hermes-vc --dry-run
 
 # Copy only specific config.yaml paths
-talaria sync default hermes-vc --only moa.max_tokens memory.provider
+talaria config sync default hermes-vc --only moa.max_tokens memory.provider
 
 # Copy everything except mcp_servers and model (target keeps its own values)
-talaria sync default hermes-vc -e mcp_servers model
+talaria config sync default hermes-vc -e mcp_servers model
 
 # Sync only one phase
-talaria sync default hermes-vc --skip-config --skip-env --skip-cache
+talaria config sync default hermes-vc --skip-config --skip-env --skip-cache
 
 # Sync a subset of skills
-talaria sync default hermes-vc --sync-skills github/dev-git-commit-message
+talaria config sync default hermes-vc --sync-skills github/dev-git-commit-message
 
 # Inject a Hermes SSE endpoint into the target's mcp_servers
-talaria sync default hermes-vc --add-mcp-serve
+talaria config sync default hermes-vc --add-mcp-serve
 
 # List the dot-notation paths in the source config
-talaria sync default --list
+talaria config sync default --list
 
 # Use explicit file paths instead of profile names
-talaria sync ~/.hermes/profiles/hermes-vc/config.yaml ~/.hermes/profiles/hermes-legal/config.yaml -e mcp_servers
+talaria config sync ~/.hermes/profiles/hermes-vc/config.yaml ~/.hermes/profiles/hermes-legal/config.yaml -e mcp_servers
 ```
 
 ### Flags
@@ -370,6 +371,7 @@ talaria sync ~/.hermes/profiles/hermes-vc/config.yaml ~/.hermes/profiles/hermes-
 | `--mcp-serve-host`    | `localhost` | Host for the Hermes SSE endpoint.                               |
 | `--dry-run`           | off     | Preview changes without writing. **Apply by default.**              |
 | `--no-backup`         | off     | Skip `.bak` backup before overwriting.                              |
+| `--force-config`      | off     | Overwrite target `config.yaml` even when source is not newer.        |
 | `--list`              | off     | List dot-notation paths in source `config.yaml` and exit.           |
 | `--list-depth`        | `2`     | Depth for `--list`.                                                 |
 | `--json`              | off     | Emit JSON report instead of human-readable output.                  |
@@ -380,7 +382,7 @@ talaria sync ~/.hermes/profiles/hermes-vc/config.yaml ~/.hermes/profiles/hermes-
 Each phase is independent and any subset runs together. The
 default — no skip flags — runs every phase.
 
-1. **`config.yaml`** — element-level merge with `--exclude` or `--only` filtering. The phase is a no-op when none of `--exclude`, `--only`, or `--add-mcp-serve` is set; sync is about *propagating deltas*, not replacing the target wholesale.
+1. **`config.yaml`** — element-level merge with `--exclude` or `--only` filtering. The phase is a no-op when none of `--exclude`, `--only`, or `--add-mcp-serve` is set; sync is about *propagating deltas*, not replacing the target wholesale. When the phase would overwrite the target config, it writes only if the source `config.yaml` has a newer file-change timestamp; use `--force-config` to bypass that timestamp guard.
 2. **`SOUL.md`** — straight copy with a `.bak` on the target when it differs.
 3. **`skills/`** — byte-level tree comparison. New and differing skills are copied; matching skills are skipped. `--sync-skills` filters by category or `category/skill-name`.
 4. **`.env`** — additive merge. New variables are appended to the target with a `# ── Synced from source profile ──` header. Existing target values are never overwritten (target is the running profile's environment; clobbering it would break a working setup).
@@ -451,6 +453,65 @@ values, `--only` copies just the listed paths) and otherwise
 leaves the target alone. To replace a file wholesale, use `cp`
 or edit the file directly.
 
+## Feature: `talaria config apply-auxiliary`
+
+Derive `model.aliases._<usecase>` entries from a profile's own
+`auxiliary.<usecase>.model` block. Unlike `config sync` (which copies
+between two profiles), this operates on a single profile's config —
+no source/target split.
+
+Hermes profiles can pin per-usecase models under
+`auxiliary.<usecase>.model`. This command surfaces those pins as
+top-level `model.aliases._<usecase>` entries so the running profile
+can reference them by name. Usecases set to a "no override" sentinel
+(`auto`, `inherit`, `default`, ...) are skipped; existing
+operator-defined aliases are always preserved.
+
+### Usage
+
+```bash
+# Derive aliases for the active profile (writes by default)
+talaria config apply-auxiliary
+
+# Target a named profile
+talaria config apply-auxiliary --profile hermes-vc
+
+# Preview without writing
+talaria config apply-auxiliary --dry-run
+
+# Explicit config.yaml path instead of profile resolution
+talaria config apply-auxiliary --config-path ~/.hermes/profiles/hermes-vc/config.yaml
+
+# Show what would be derived, then exit
+talaria config apply-auxiliary --show-resolution
+```
+
+### Flags
+
+| Flag                | Default | Effect                                                              |
+|---------------------|---------|---------------------------------------------------------------------|
+| `--profile`         | active  | Hermes profile whose `config.yaml` should be updated.               |
+| `--config-path`     | —       | Explicit `config.yaml` path (overrides `--profile` resolution).     |
+| `--dry-run`         | off     | Preview the derived aliases without writing. **Apply by default.**  |
+| `--no-backup`       | off     | Skip `.bak` backup before overwriting.                              |
+| `--json`            | off     | Emit JSON report instead of human-readable output.                  |
+| `--show-resolution` | off     | Print the resolved config path and derived aliases, then exit.      |
+
+### Output
+
+Human mode prints the profile/config banner, one line per alias
+(`new` / `update` / `ok`), the count of preserved unrelated aliases,
+and a final verdict. `--json` emits the structured report with keys
+`ok`, `changed`, `dry_run`, `config_path`, `aliases`, `added`,
+`updated`, `kept`, `preserved`, `write_confirmed`, `backup`, `written`.
+
+### Exit codes
+
+| Code | Meaning                                      |
+|------|----------------------------------------------|
+| `0`  | Success — aliases derived (or no-op / dry run). |
+| `2`  | Tool error — config not found, YAML validation failure, write failure. |
+
 ## Configuration
 
 Talaria reads no configuration files itself. Every input is a CLI flag or environment variable.
@@ -463,10 +524,13 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 
 ## Adding a new feature
 
-Talaria has two feature groups. Inspection features live under
-`talaria/hermos/` (read-only against `state.db` and `logs/`). Sync
-phases live under `talaria/sync/` (the write-bearing carve-out;
-copies profile artefacts between profiles).
+Talaria has two feature groups plus a configuration command group.
+Inspection features live under `talaria/hermos/` (read-only against
+`state.db` and `logs/`). Sync phases live under `talaria/sync/` (the
+write-bearing carve-out; copies profile artefacts between profiles).
+Single-profile configuration features (sync's sibling commands under
+`talaria config`) also live under `talaria/hermos/` when they operate
+on one profile's own files.
 
 Inspection feature (canonical shape — `moa_truncation`):
 
@@ -492,7 +556,7 @@ pytest
 talaria paths   # confirm path resolution is sane
 talaria hermes moa-truncation --show-resolution
 talaria hermes refresh-catalog --show-resolution
-talaria sync default hermes-vc --dry-run   # preview a sync without writing
+talaria config sync default hermes-vc --dry-run   # preview a sync without writing
 ```
 
 The test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub `urllib.request.urlopen`; no real Kilo Code calls happen during `pytest`.

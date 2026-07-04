@@ -49,6 +49,7 @@ def sync_config(
     mcp_serve_host: str = "localhost",
     apply: bool = True,
     no_backup: bool = False,
+    force: bool = False,
 ) -> ConfigPhaseResult | None:
     """Run the ``config.yaml`` sync phase and return its result.
 
@@ -88,6 +89,19 @@ def sync_config(
     if not source.config_yaml.exists():
         result.status = "skipped"
         result.logs.append(f"  skip: source has no config.yaml ({source.config_yaml})")
+        return result
+
+    if (
+        (excludes or only_paths or add_mcp_serve)
+        and not force
+        and target.config_yaml.exists()
+        and source.config_yaml.stat().st_mtime_ns <= target.config_yaml.stat().st_mtime_ns
+    ):
+        result.status = "skipped"
+        result.logs.append(
+            "  skip: source config.yaml is not newer than target "
+            f"({source.config_yaml} <= {target.config_yaml})"
+        )
         return result
 
     source_data = load_yaml(source.config_yaml)

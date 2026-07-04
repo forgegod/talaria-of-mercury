@@ -19,6 +19,10 @@ caches.
 - `context_cache_fix` is profile-scoped by design — it repairs only the
   selected profile's `context_length_cache.yaml` using a curated fix table
   and preserves unrelated cache entries.
+- `auxiliary` is profile-scoped by design — it derives
+  `model.aliases._<usecase>` entries from the selected profile's own
+  `auxiliary.<usecase>.model` block and writes them back into the same
+  profile's `config.yaml`. No source/target split.
 - `skill_install` is profile-scoped by design — it expands recursive skill
   identifiers, invokes `hermes skills install` for each child skill, and
   updates only that profile's `config.yaml` skill enable/disable policy.
@@ -44,6 +48,12 @@ caches.
 - `skill_install` reports use `ok: bool`; recursive installs are disabled by
   default via `skills.disabled` unless `--force-enable` or `--enable` says
   otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
+- `auxiliary` reports use `ok: bool` and `changed: bool`. Writes go
+  through the same atomic backup writer used by sync and
+  `context_cache_fix`. `--dry-run` must not write a `config.yaml` or
+  backup. Usecases whose `model` is a "no override" sentinel
+  (`auto`, `inherit`, `default`, ...) are skipped; existing
+  operator-defined `model.aliases` keys are always preserved.
 
 ## Work Guidance
 
@@ -73,6 +83,9 @@ caches.
   resolution.
 - `skill_install` tests cover GitHub tree expansion, default-disabled policy,
   selected enablement, force-enable, dry-run suppression, and CLI flags.
+- `auxiliary` tests cover alias injection, sentinel skipping, alias
+  preservation, no-op cases, idempotency, dry-run suppression, profile
+  path resolution, and CLI flags.
 
 ## Child DOX Index
 
@@ -84,3 +97,6 @@ caches.
   `context_length_cache.yaml` with atomic writes and backups.
 - `skill_install.py` — expand recursive skill identifiers and run per-skill
   Hermes installs, then update `skills.disabled` in profile config.
+- `auxiliary.py` — derive `model.aliases._<usecase>` from a profile's own
+  `auxiliary.<usecase>.model` block. Single-profile; surfaced as
+  `talaria config apply-auxiliary`.

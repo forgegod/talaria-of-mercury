@@ -18,12 +18,13 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 - Exit codes: `0` clean, `1` signal fired, `2` tool error.
 - All filesystem and SQLite access is **read-only against the Hermes runtime**
   for inspection features (`hermes moa-truncation`, `paths`).
-  Write-bearing carve-outs are explicit: `talaria sync` copies profile
-  artefacts between profiles, and `talaria hermes fix-context-cache`
-  repairs `context_length_cache.yaml` in one profile, and
-  `talaria hermes install-skills-recursive` installs third-party skills
-  then updates that profile's `skills.disabled` policy. None touches
-  `state.db` or rotates logs.
+  Write-bearing carve-outs are explicit: `talaria config sync` copies profile
+  artefacts between profiles, `talaria config apply-auxiliary` derives
+  `model.aliases` from a profile's `auxiliary` block,
+  `talaria hermes fix-context-cache` repairs `context_length_cache.yaml`
+  in one profile, and `talaria hermes install-skills-recursive` installs
+  third-party skills then updates that profile's `skills.disabled` policy.
+  None touches `state.db` or rotates logs.
 - Every CLI subcommand must accept `--json` and a human-readable default renderer.
 
 ## Work Guidance
@@ -50,7 +51,8 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
 - `hermos/` — Hermes features: inspections, catalog refresh, explicit
-  context-cache repair, and recursive skill install orchestration.
-- `sync/` — Hermes sync feature group (the only write-bearing group; copies
-  profile artefacts between profiles).
+  context-cache repair, recursive skill install orchestration, and
+  single-profile auxiliary-alias derivation (`talaria config apply-auxiliary`).
+- `sync/` — Hermes sync feature group (the write-bearing group behind
+  `talaria config sync`; copies profile artefacts between profiles).
 - `paths.py` — profile + path resolution shared by every inspection feature.

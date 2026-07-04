@@ -168,7 +168,7 @@ def cmd_hermes_install_skills_recursive(args: argparse.Namespace) -> int:
     return exit_code
 
 
-# ---------- Subcommand: talaria sync ----------
+# ---------- Subcommand: talaria config sync ----------
 def _build_sync_options(args: argparse.Namespace) -> SyncOptions:
     """Translate argparse ``Namespace`` into a :class:`SyncOptions`.
 
@@ -191,6 +191,7 @@ def _build_sync_options(args: argparse.Namespace) -> SyncOptions:
         skip_skills=args.skip_skills,
         skip_env=args.skip_env,
         skip_cache=args.skip_cache,
+        force_config=args.force_config,
     )
 
 
@@ -250,6 +251,29 @@ def sync_list_config_paths(profile, *, max_depth: int) -> list[str]:
     """Thin wrapper so ``cmd_sync`` does not import sync internals."""
     from talaria.sync.config import list_config_paths
     return list_config_paths(profile, max_depth=max_depth)
+
+
+# ---------- Subcommand: talaria config apply-auxiliary ----------
+def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
+    from talaria.hermos import auxiliary
+
+    paths = resolve_paths(profile_flag=args.profile)
+    config_path = Path(args.config_path) if args.config_path else None
+    if args.show_resolution:
+        print(auxiliary.show_resolution(paths, config_path=config_path))
+        return 0
+    report = auxiliary.run(
+        paths,
+        config_path=config_path,
+        apply=not args.dry_run,
+        no_backup=args.no_backup,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    exit_code, text = auxiliary.render_human(report)
+    print(text)
+    return exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -452,8 +476,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_skill_install.set_defaults(func=cmd_hermes_install_skills_recursive)
 
-    # talaria sync
-    p_sync = sub.add_parser(
+    # talaria config ...
+    config_grp = sub.add_parser(
+        "config", help="Configuration maintenance: sync profiles and derive aliases.",
+        description=(
+            "Configuration maintenance commands. sync copies profile "
+            "artefacts between two profiles; apply-auxiliary derives "
+            "model.aliases from a single profile's auxiliary block."
+        ),
+    )
+    config_sub = config_grp.add_subparsers(dest="config_command", required=True, metavar="COMMAND")
+
+    # talaria config sync
+    p_sync = config_sub.add_parser(
         "sync",
         help="Copy Hermes profile artefacts from source to target.",
         description=(
@@ -512,6 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Preview changes without writing.")
     p_sync.add_argument("--no-backup", action="store_true",
                         help="Skip .bak backup before overwriting.")
+    p_sync.add_argument("--force-config", action="store_true",
+                        help="Overwrite target config.yaml even when the source config.yaml is not newer.")
     # introspection
     p_sync.add_argument("--list", action="store_true",
                         help="List dot-notation paths in source config.yaml and exit.")
@@ -523,6 +560,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.add_argument("-v", "--verbose", action="store_true",
                         help="Show diffs, per-skill detail, and source/target banners.")
     p_sync.set_defaults(func=cmd_sync)
+
+    # talaria config apply-auxiliary
+    p_auxiliary = config_sub.add_parser(
+        "apply-auxiliary",
+        help="Derive model.aliases from a profile's auxiliary block.",
+        description=(
+            "Read the selected profile's auxiliary.<usecase>.model pins and "
+            "surface them as model.aliases._<usecase> entries in the same "
+            "profile's config.yaml. Usecases set to a sentinel (auto, "
+            "inherit, default, ...) are skipped; existing operator-defined "
+            "aliases are preserved."
+        ),
+    )
+    p_auxiliary.add_argument(
+        "--profile", help="Hermes profile whose config.yaml should be updated.",
+    )
+    p_auxiliary.add_argument(
+        "--config-path", type=Path, default=None,
+        help="Explicit config.yaml path (overrides --profile resolution).",
+    )
+    p_auxiliary.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview the derived aliases without writing.",
+    )
+    p_auxiliary.add_argument(
+        "--no-backup", action="store_true",
+        help="Skip .bak backup before overwriting config.yaml.",
+    )
+    p_auxiliary.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_auxiliary.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print the resolved config path and the aliases that would be derived, then exit.",
+    )
+    p_auxiliary.set_defaults(func=cmd_config_apply_auxiliary)
 
     return p
 

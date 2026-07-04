@@ -16,6 +16,7 @@ the installed package is importable.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -238,7 +239,7 @@ class TestConfigPhase:
         (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "dst-val"}, "agent": {"x": 99}}))
         src = resolve_profile("src", root=tmp_path / HERMES)
         tgt = resolve_profile("dst", root=tmp_path / HERMES)
-        result = sync_config(src, tgt, excludes=["model.name"], apply=True)
+        result = sync_config(src, tgt, force=True, excludes=["model.name"], apply=True)
         merged = load_yaml(target_dir / "config.yaml")
         assert merged["model"]["name"] == "dst-val"  # target wins on excluded
         assert merged["agent"]["x"] == 1  # source supplies
@@ -249,7 +250,7 @@ class TestConfigPhase:
         (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "dst"}, "extra": "kept"}))
         src = resolve_profile("src", root=tmp_path / HERMES)
         tgt = resolve_profile("dst", root=tmp_path / HERMES)
-        result = sync_config(src, tgt, only_paths=["model.name"], apply=True)
+        result = sync_config(src, tgt, force=True, only_paths=["model.name"], apply=True)
         merged = load_yaml(target_dir / "config.yaml")
         assert merged["model"]["name"] == "x"
         assert "agent" not in merged
@@ -261,7 +262,7 @@ class TestConfigPhase:
         src = resolve_profile("src", root=tmp_path / HERMES)
         tgt = resolve_profile("dst", root=tmp_path / HERMES)
         with pytest.raises(ValueError):
-            sync_config(src, tgt, excludes=["model"], only_paths=["agent"])
+            sync_config(src, tgt, force=True, excludes=["model"], only_paths=["agent"])
 
     def test_in_sync_with_exclude_no_op(self, tmp_path: Path) -> None:
         cfg = {"model": {"name": "x"}}
@@ -270,7 +271,7 @@ class TestConfigPhase:
         (target_dir / "config.yaml").write_text(dump_yaml(cfg))
         src = resolve_profile("src", root=tmp_path / HERMES)
         tgt = resolve_profile("dst", root=tmp_path / HERMES)
-        result = sync_config(src, tgt, excludes=["model.name"], apply=True)
+        result = sync_config(src, tgt, force=True, excludes=["model.name"], apply=True)
         assert result.status == "in_sync"
         assert result.write_confirmed is False
 
@@ -279,12 +280,59 @@ class TestConfigPhase:
         target_dir = _make_profile(tmp_path, "dst")
         src = resolve_profile("src", root=tmp_path / HERMES)
         tgt = resolve_profile("dst", root=tmp_path / HERMES)
-        first = sync_config(src, tgt, add_mcp_serve=True, apply=True)
+        first = sync_config(src, tgt, force=True, add_mcp_serve=True, apply=True)
         assert first.write_confirmed is True
-        second = sync_config(src, tgt, add_mcp_serve=True, apply=True)
+        second = sync_config(src, tgt, force=True, add_mcp_serve=True, apply=True)
         assert second.status == "in_sync"
         merged = load_yaml(target_dir / "config.yaml")
         assert merged["mcp_servers"]["hermes"]["transport"] == "sse"
+
+    def test_skips_when_source_config_not_newer(self, tmp_path: Path) -> None:
+        source_dir = _make_source(tmp_path, "src", {"model": {"name": "src"}})
+        target_dir = _make_profile(tmp_path, "dst")
+        (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "target"}}))
+        os.utime(source_dir / "config.yaml", ns=(1_000_000_000, 1_000_000_000))
+        os.utime(target_dir / "config.yaml", ns=(2_000_000_000, 2_000_000_000))
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+
+        result = sync_config(src, tgt, excludes=["agent"], apply=True)
+
+        assert result is not None
+        assert result.status == "skipped"
+        assert result.write_confirmed is False
+        assert load_yaml(target_dir / "config.yaml")["model"]["name"] == "target"
+
+    def test_writes_when_source_config_newer(self, tmp_path: Path) -> None:
+        source_dir = _make_source(tmp_path, "src", {"model": {"name": "src"}})
+        target_dir = _make_profile(tmp_path, "dst")
+        (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "target"}}))
+        os.utime(target_dir / "config.yaml", ns=(1_000_000_000, 1_000_000_000))
+        os.utime(source_dir / "config.yaml", ns=(2_000_000_000, 2_000_000_000))
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+
+        result = sync_config(src, tgt, excludes=["agent"], apply=True)
+
+        assert result is not None
+        assert result.status == "updated"
+        assert result.write_confirmed is True
+        assert load_yaml(target_dir / "config.yaml")["model"]["name"] == "src"
+
+    def test_force_config_overrides_timestamp_guard(self, tmp_path: Path) -> None:
+        source_dir = _make_source(tmp_path, "src", {"model": {"name": "src"}})
+        target_dir = _make_profile(tmp_path, "dst")
+        (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "target"}}))
+        os.utime(source_dir / "config.yaml", ns=(1_000_000_000, 1_000_000_000))
+        os.utime(target_dir / "config.yaml", ns=(2_000_000_000, 2_000_000_000))
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+
+        result = sync_config(src, tgt, excludes=["agent"], force=True, apply=True)
+
+        assert result is not None
+        assert result.status == "updated"
+        assert load_yaml(target_dir / "config.yaml")["model"]["name"] == "src"
 
 
 # ---------- soul phase ----------
@@ -585,9 +633,9 @@ class TestRunSync:
 # ---------- CLI surface ----------
 class TestSyncCLI:
     def _cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-        """Run ``python -m talaria.cli sync ...`` and return the result."""
+        """Run ``python -m talaria.cli config sync ...`` and return the result."""
         return subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "sync", *args],
+            [sys.executable, "-m", "talaria.cli", "config", "sync", *args],
             capture_output=True, text=True, cwd=str(REPO_ROOT),
             env=env,
         )
@@ -624,7 +672,7 @@ class TestSyncCLI:
         _make_source(tmp_path, "src", {"model": {"name": "x"}, "agent": {"x": 1}})
         _make_profile(tmp_path, "dst")
         result = self._cli(
-            "src", "dst", "-e", "model", "--json",
+            "src", "dst", "-e", "model", "--json", "--force-config",
             "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
             env={"HOME": str(tmp_path)},
         )
@@ -646,7 +694,7 @@ class TestSyncCLI:
         target_dir = _make_profile(tmp_path, "dst")
         (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "dst"}, "agent": {"x": 9}}))
         result = self._cli(
-            "src", "dst", "-e", "model.name",
+            "src", "dst", "-e", "model.name", "--force-config",
             "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
             env={"HOME": str(tmp_path)},
         )

@@ -19,10 +19,15 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 - `cmd_<name>(args)` functions are private dispatcher targets — they are
   registered on subparsers via `set_defaults(func=...)` and never called by
   external code.
-- `talaria sync` is a flat subcommand (no nested subsubparser): it takes
-  `<source>` and optional `<target>`, plus flags that select/configure the
-  five sync phases and the `--add-mcp-serve` injection. Defaults to
-  apply-by-default; `--dry-run` opts out.
+- `talaria config sync` is a flat subcommand under the `config` command
+  group (no nested subsubparser): it takes `<source>` and optional
+  `<target>`, plus flags that select/configure the five sync phases and
+  the `--add-mcp-serve` injection. Defaults to apply-by-default;
+  `--dry-run` opts out.
+- `talaria config apply-auxiliary` is the sibling command under
+  `config`: single-profile alias derivation. It takes `--profile` /
+  `--config-path` and the standard write-feature flags
+  (`--dry-run`, `--no-backup`, `--json`, `--show-resolution`).
 
 ## Work Guidance
 
