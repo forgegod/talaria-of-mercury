@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -103,3 +105,55 @@ class TestCanonicalRoot:
 
     def test_active_profile_file_under_root(self) -> None:
         assert ACTIVE_PROFILE_FILE == Path.home() / ".hermes" / "active_profile"
+
+
+class TestCli:
+    """`talaria paths` prints the resolved profile + paths by default."""
+
+    def test_default_run_prints_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Lay down a hermes root with an active profile file.
+        (tmp_path / ".hermes").mkdir()
+        (tmp_path / ".hermes" / "active_profile").write_text("default")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("HERMES_PROFILE", raising=False)
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "paths"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "profile:" in proc.stdout
+        assert "hermes_root:" in proc.stdout
+        assert "state_db:" in proc.stdout
+        assert "log_dir:" in proc.stdout
+
+    def test_json_flag_still_works(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".hermes").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("HERMES_PROFILE", raising=False)
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "paths", "--json"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = __import__("json").loads(proc.stdout)
+        assert payload["profile"] == DEFAULT_PROFILE_NAME
+        assert "hermes_root" in payload
+        assert "state_db" in payload
+        assert "log_dir" in payload
+
+    def test_help_no_longer_mentions_verbose(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "paths", "--help"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0
+        assert "--verbose" not in proc.stdout
+        assert "-v," not in proc.stdout

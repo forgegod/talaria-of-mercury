@@ -383,6 +383,39 @@ class TestCli:
         assert "--keep" in proc.stdout
         assert "--all-profiles" in proc.stdout
 
+    def test_help_no_longer_mentions_verbose(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "log-rotate", "--help"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0
+        assert "--verbose" not in proc.stdout
+        assert "-v," not in proc.stdout
+
+    def test_default_run_prints_report(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # log-rotate is explicit-only: with no action flags it reports
+        # scanned size/age and exits 0 without writing. The human
+        # report must print by default (no --verbose needed).
+        _log(tmp_path, "agent.log").write_bytes(b"hello")
+        _log(tmp_path, "errors.log").write_bytes(b"world")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("HERMES_PROFILE", raising=False)
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "log-rotate"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        # The renderer always emits the "Hermes log rotation" header
+        # and the VERDICT line; the point of this test is that they
+        # reach stdout without --verbose.
+        assert "Hermes log rotation" in proc.stdout
+        assert "VERDICT:" in proc.stdout
+        assert "scanned:" in proc.stdout
+
     def test_no_flags_reports_scanned(self, tmp_path: Path) -> None:
         # With no flags, the tool should report but not write.
         _log(tmp_path, "agent.log").write_bytes(b"hello")

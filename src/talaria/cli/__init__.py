@@ -57,11 +57,10 @@ def cmd_paths(args: argparse.Namespace) -> int:
             },
         })
         return 0
-    if args.verbose:
-        print(f"profile:     {paths.profile}")
-        print(f"hermes_root: {paths.hermes_root}")
-        print(f"state_db:    {paths.state_db}")
-        print(f"log_dir:     {paths.log_dir}")
+    print(f"profile:     {paths.profile}")
+    print(f"hermes_root: {paths.hermes_root}")
+    print(f"state_db:    {paths.state_db}")
+    print(f"log_dir:     {paths.log_dir}")
     return 0
 
 
@@ -422,10 +421,9 @@ def cmd_hermes_log_rotate(args: argparse.Namespace) -> int:
         _print_json({"reports": reports})
         return 0
 
-    if args.verbose:
-        for r in reports:
-            exit_code, text = log_rotate_module.render_human(r)
-            print(text)
+    for r in reports:
+        exit_code, text = log_rotate_module.render_human(r)
+        print(text)
     return 0
 
 
@@ -532,10 +530,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_paths.add_argument("--state-db", type=Path, help="Explicit state.db path override.")
     p_paths.add_argument("--log-dir", type=Path, help="Explicit logs/ directory override.")
     p_paths.add_argument("--json", action="store_true", help="Emit JSON.")
-    p_paths.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Print the resolved paths to stdout (default: silent, exit code only).",
-    )
     p_paths.set_defaults(func=cmd_paths)
 
     # talaria completion
@@ -783,10 +777,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_log_rotate.add_argument(
         "--show-resolution", action="store_true",
         help="Print resolved log dir, scanned size, and planned actions, then exit.",
-    )
-    p_log_rotate.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_log_rotate.set_defaults(func=cmd_hermes_log_rotate)
 
