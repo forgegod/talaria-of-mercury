@@ -231,6 +231,14 @@ caches.
   surfaced via the report's `ok: False` + `error` field (and via
   `print_error(...)` from the sync renderer when the failure happens
   before a report can be assembled), never via ad-hoc prints.
+
+  Carve-out: `log_rotate` is explicit-only and prints by default from
+  the CLI (no `--verbose` flag). With no action flags the renderer
+  reports a "no actions planned" verdict that the operator must see to
+  confirm the filesystem was untouched; gating that behind `--verbose`
+  would hide the safety signal. The `run()` function itself stays
+  silent — the carve-out is at the CLI dispatcher, not in this
+  module.
 - Feature-specific constants (regexes, thresholds, default windows) live at
   the top of the module.
 - Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`

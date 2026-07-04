@@ -66,12 +66,32 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   add `-v/--verbose` to the matching subparser. The default run is exit
   code only — operators pipe through scripts and don't want chatter.
   `--json` and `--show-resolution` always print (explicit data channels).
-  Errors always go to stderr. `talaria paths` is included: it is a debug
-  helper, not a noisy program, and the operator can opt in with `-v`.
+  Errors always go to stderr.
   When a feature module already has an internal `_say(verbose)` helper
   (e.g. `skill_install`, `skill_uninstall`), the CLI-level gate is in
   addition to it: `--verbose` enables both the per-step progress stream
   and the final report print.
+
+  Carve-outs (do NOT add `-v/--verbose` to these — they print by default
+  because their only job is to print):
+
+  * `talaria paths` (`cmd_paths`) — its output is the resolved
+    profile + paths. The CLI prints the four `key: value` lines on
+    every successful run; `--json` switches the channel to a JSON
+    envelope. (Previous behaviour was a `--verbose` gate; that was a
+    regression for a debug helper whose job is to print.)
+  * `talaria hermes log-rotate` (`cmd_hermes_log_rotate`) — the
+    tool is explicit-only: with no `--max-size` / `--max-age` /
+    `--max-total` flag the filesystem is never touched and the
+    report's `dry_run` is true. In both no-action and action runs
+    the renderer always prints; gating it behind `--verbose` would
+    hide the "no actions planned" verdict that tells the operator
+    nothing was done.
+  * `talaria completion` (`cmd_completion`) — its sole output is
+    the shell script. (Pre-existing exception.)
+  * `talaria config sync --list` (the `--list` branch inside
+    `cmd_sync`) — the operator asked for the dot-path list; that's
+    the answer. (Pre-existing behaviour, intentionally not gated.)
 - Profile-agnostic features (e.g. `talaria hermes refresh-catalog`) still
   call `resolve_paths()` for dispatcher shape symmetry, but the resolved
   profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.

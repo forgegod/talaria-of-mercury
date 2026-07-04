@@ -85,7 +85,13 @@ Talaria is **silent by default** so it scripts cleanly. Every data-producing sub
 - `--show-resolution` — print the resolved paths / sources and exit 0 without running the feature (always prints, useful for debugging).
 - `-v`, `--verbose` — print the human-readable report to stdout. Without this flag the default run is exit code only; stdout stays empty on success and the exit code is the only signal. Errors still go to stderr.
 
-`talaria completion` is the one exception: its only output is the completion script itself, which the operator asked for.
+Two commands print by default with no `--verbose` needed, because their only job is to print:
+
+- `talaria paths` — its output *is* the resolved profile + paths.
+- `talaria hermes log-rotate` — explicit-only: with no action flags it reports scanned size/age and exits 0 without writing. The report is the answer.
+- `talaria completion` — its output *is* the completion script the operator asked for.
+- `talaria config sync --list` — its output *is* the dot-path list the operator asked for.
+- `--json` and `--show-resolution` on any other command — the operator asked for that channel.
 
 ### Debug helpers
 
@@ -282,7 +288,8 @@ talaria hermes log-rotate --all-profiles --dry-run --json
 | `--dry-run` | off | Plan actions without copying, gzipping, truncating, or deleting. |
 | `--json` | off | Emit JSON instead of human-readable output. |
 | `--show-resolution` | off | Print the resolved log dir, scanned size, and planned actions, then exit. |
-| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
+
+The report prints to stdout by default (no `--verbose` needed).
 
 ### Report shape
 

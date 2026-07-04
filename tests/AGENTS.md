@@ -28,6 +28,15 @@ Pytest suite for the Talaria CLI and library.
   scripts, or `--show-resolution` output are unaffected because those
   channels always print.
 
+  Carve-outs (default run prints, no `--verbose` needed in tests):
+
+  * `talaria paths` — human-readable default; pass `--json` for the
+    JSON channel.
+  * `talaria hermes log-rotate` — human-readable default for both
+    no-action and action runs.
+  * `talaria completion` and `talaria config sync --list` — the
+    output is the answer the test asked for.
+
 ## Work Guidance
 
 - New feature: drop a `tests/test_<feature>.py` alongside the existing
@@ -41,12 +50,12 @@ Pytest suite for the Talaria CLI and library.
 ## Verification
 
 - `pytest` from the repo root must exit 0 before any change ships.
-- Coverage gaps: `talaria.cli.cmd_paths` is currently uncovered — add a
-  CLI test when adding new top-level commands.
+- Coverage gaps: none tracked.
 
 ## Child DOX Index
 
-- `test_paths.py` — `talaria.paths` resolution precedence.
+- `test_paths.py` — `talaria.paths` resolution precedence and the
+  `talaria paths` CLI dispatch (default-prints contract).
 - `test_moa_truncation.py` — Signal A, Signal B, renderer, JSON output, CLI.
 - `test_refresh_catalog.py` — reshape, credential discovery, cache
   freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.

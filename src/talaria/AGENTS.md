@@ -22,9 +22,19 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   `--json` and `--show-resolution` always print (explicit data
   channels). Errors always go to stderr. The contract is enforced
   in the dispatcher layer (`src/talaria/cli/AGENTS.md`) and applies
-  uniformly to every command group: `paths`, `hermes`, `config`,
-  `skills`, `completion` (completion is excluded — its sole output
-  is the script itself, which is the data the operator asked for).
+  uniformly to every command group: `hermes`, `config`, `skills`.
+
+  Four carve-outs print by default with no `--verbose` needed, because
+  their only job is to print:
+
+  * `talaria paths` — its output *is* the resolved profile + paths.
+  * `talaria hermes log-rotate` — explicit-only: with no action flags
+    it reports scanned size/age and exits 0 without writing. The report
+    is the answer.
+  * `talaria completion` — its output *is* the completion script the
+    operator asked for.
+  * `talaria config sync --list` — its output *is* the dot-path list
+    the operator asked for.
 - All filesystem and SQLite access is **read-only against the Hermes runtime**
   for inspection features (`hermes moa-truncation`, `paths`).
   Write-bearing carve-outs are explicit: `talaria config sync` copies profile
