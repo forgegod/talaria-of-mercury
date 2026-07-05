@@ -30,7 +30,7 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria paths` | — | Print the resolved profile + paths Talaria would inspect. |
 | `talaria completion <shell>` | — | Print a bash or zsh shell completion script. |
 | `talaria hermes diagnose` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
-| `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. |
+| `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. Parallel subprocess execution (`--jobs`). |
 | `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
 | `talaria hermes fix-context-cache` | maintenance | Repair curated known-bad entries in a profile's context cache. |
 | `talaria hermes serve-stop` | maintenance | Detect and stop the Hermes dashboard/serve backend by port. |
@@ -238,6 +238,7 @@ talaria hermes benchmark --no-vision
 | `--ttl SECONDS` | `1800` | Cache TTL for smoke + vision results (30 min). Within the window, cached results are reused. |
 | `--no-smoke` | off | Skip all JSON smoke calls; report only state.db data. |
 | `--no-vision` | off | Skip all vision-capability checks. By default, every discovered model whose capabilities include vision (per models.dev) is tested against the vision fixture images. |
+| `--jobs N`, `-j N` | `8` | Max parallel subprocess calls for smoke and vision checks. Each call is an I/O-bound model API wait, so parallelism gives near-linear speedup on the cold path. Use `--jobs 1` for sequential execution. |
 | `--vision-fixtures-dir PATH` | `assets/benchmark/vision/` | Override the vision fixture-image directory. |
 | `--profile NAME` | from env/file | Profile to inspect. |
 | `--state-db PATH` | resolved | Override the `state.db` path. |
@@ -275,6 +276,8 @@ Vision is integrated into the benchmark itself, not a separate command. Every di
 Vision results are cached alongside smoke results in the same cache file (`$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`), keyed by `<model_id>::vision::<fixture_label>`. The fixture images live in `assets/benchmark/vision/` and can be overridden with `--vision-fixtures-dir`.
 
 Ground-truth entries support `|`-separated alternatives for visually-ambiguous fixtures — e.g. the stylised wing glyph may read as "wings", "winged", "sandal", or "butterfly" depending on the model, all of which are valid. Pass `--no-vision` to skip all vision checks.
+
+Smoke and vision calls run in parallel (default 8 workers, `--jobs N` to tune). Each call is an I/O-bound model API wait, so a cold run of 10 vision-capable models × 4 fixtures (40 calls) finishes in ~3 min instead of ~21 min sequential.
 
 ## Feature: `talaria hermes refresh-catalog`
 

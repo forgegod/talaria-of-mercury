@@ -121,6 +121,7 @@ def cmd_hermes_benchmark(args: argparse.Namespace) -> int:
             paths,
             days=args.days,
             ttl=args.ttl,
+            jobs=args.jobs,
             config_path=Path(args.config) if args.config else None,
             vision_fixtures_dir=Path(args.vision_fixtures_dir) if args.vision_fixtures_dir else None,
         ))
@@ -131,6 +132,7 @@ def cmd_hermes_benchmark(args: argparse.Namespace) -> int:
         ttl=args.ttl,
         smoke=not args.no_smoke,
         vision=not args.no_vision,
+        jobs=args.jobs,
         config_path=Path(args.config) if args.config else None,
         cache_path=Path(args.cache) if args.cache else None,
         vision_fixtures_dir=Path(args.vision_fixtures_dir) if args.vision_fixtures_dir else None,
@@ -762,6 +764,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Skip all vision-capability checks. By default, every "
             "discovered model whose capabilities include vision (per "
             "models.dev) is tested against the vision fixture images."
+        ),
+    )
+    p_bench.add_argument(
+        "--jobs", "-j", type=int, default=benchmark_module.DEFAULT_JOBS,
+        help=(
+            f"Max parallel subprocess calls for smoke and vision checks "
+            f"(default: {benchmark_module.DEFAULT_JOBS}). Each call is an "
+            f"I/O-bound model API wait, so parallelism gives near-linear "
+            f"speedup on the cold path. Use --jobs 1 for the old sequential "
+            f"behaviour."
         ),
     )
     p_bench.add_argument(

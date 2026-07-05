@@ -169,10 +169,14 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   1800 = 30 min — within the window, smoke results are reused from the
   cache file; after expiry, one fresh JSON smoke call is made per
   discovered model), `--no-smoke` (skip all smoke calls; report only
-  state.db data), `--profile`, `--state-db`, `--config` (explicit
-  config.yaml path), `--cache` (explicit cache file path), `--json`,
-  `--show-resolution`, `-q/--quiet`, `-v/--verbose`. Like `diagnose`,
-  benchmark is print-by-default; `-q` suppresses the report.
+  state.db data), `--no-vision` (skip vision checks), `--jobs`/`-j` (max
+  parallel subprocess calls for smoke and vision, default 8; each call
+  is an I/O-bound model API wait so `ThreadPoolExecutor` gives near-linear
+  speedup; `--jobs 1` restores sequential execution), `--profile`,
+  `--state-db`, `--config` (explicit config.yaml path), `--cache`
+  (explicit cache file path), `--json`, `--show-resolution`, `-q/--quiet`,
+  `-v/--verbose`. Like `diagnose`, benchmark is print-by-default; `-q`
+  suppresses the report.
   Exit code 0 when all smoke tests pass, 1 when any model fails.
 - `talaria completion` delegates to `talaria.cli.completion`, which walks the
   live `build_parser()` tree at invocation time and emits a static bash/zsh

@@ -16,6 +16,12 @@ model the profile routes through. Two data sources are combined:
    ``talaria hermes benchmark`` invocations within the TTL window do
    not burn tokens.
 
+Smoke and vision calls run in parallel via a
+:class:`~concurrent.futures.ThreadPoolExecutor` (default 8 workers,
+``--jobs N`` to tune). Each call is an I/O-bound ``subprocess.run``
+(waiting on a model API), so parallelism gives near-linear speedup
+on the cold path.
+
 Model **capabilities** (reasoning, tool-call, vision/attachment,
 context/output limits, per-token cost) are enriched from the Hermes
 ``models_dev_cache.json`` when available. The provider prefix in the
@@ -35,6 +41,7 @@ import shutil
 import sqlite3
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,6 +62,11 @@ DEFAULT_TTL_SECONDS = 30 * 60
 #: Per-smoke-call timeout (seconds). Individual model checks should be
 #: fast because the prompt is small.
 SMOKE_TIMEOUT = 90
+
+#: Default parallelism for smoke and vision subprocess calls. Each call
+#: is an I/O-bound ``subprocess.run`` (waiting on the model API), so
+#: threads give real parallelism — the GIL is released during the wait.
+DEFAULT_JOBS = 8
 
 #: Cache file path under ``$XDG_CACHE_HOME``. Profile-scoped: the
 #: profile name is part of the filename so multiple profiles don't
@@ -597,6 +609,7 @@ def run(
     vision: bool = True,
     vision_runner: Callable[..., tuple[int, str, str]] | None = None,
     vision_fixtures_dir: Path | None = None,
+    jobs: int = DEFAULT_JOBS,
 ) -> dict[str, Any]:
     """Run the benchmark and assemble a report.
 
@@ -621,6 +634,12 @@ def run(
         vision_fixtures_dir: override the fixture-image directory.
             Defaults to ``assets/benchmark/vision/`` resolved from
             the repository root.
+        jobs: max parallel subprocess calls for smoke and vision
+            (default :data:`DEFAULT_JOBS`). Each call is an
+            I/O-bound ``subprocess.run`` (waiting on a model API),
+            so a :class:`~concurrent.futures.ThreadPoolExecutor`
+            gives real parallelism. Set to 1 to restore the old
+            sequential behaviour.
     """
     cfg = _load_config(paths) if config_path is None else (
         yaml.safe_load(config_path.read_text()) or {}
@@ -641,53 +660,76 @@ def run(
         latencies = _first_response_latency(con, since_ts)
         con.close()
 
-    # Smoke calls with cache
     c_path = cache_path or _default_cache_path(paths.profile)
     cache = _load_cache(c_path)
     now = time.time()
+    n_workers = max(1, jobs)
+
+    # ---- Smoke calls ----
+    # Two-phase: (1) classify each target into fresh/cached/skipped
+    # without any I/O; (2) dispatch the fresh calls to the thread
+    # pool; (3) merge results back into the cache + results dict.
+    smoke_fresh: list[tuple[ModelTarget, str]] = []  # (target, cache_key=t.id)
     smoke_results: dict[str, Any] = {}
     smoke_made = 0
     smoke_cached = 0
     smoke_skipped = 0
 
     for t in targets:
+        if not smoke:
+            smoke_skipped += 1
+            continue
         entry = cache.get(t.id)
-        if smoke and (entry is None or not _cache_is_fresh(entry, ttl)):
-            result = _smoke_call(
-                t.model, t.provider,
-                runner=smoke_runner,
-            )
-            result["smoke_ts"] = now
-            cache[t.id] = result
-            smoke_results[t.id] = result
-            smoke_made += 1
-        elif smoke and entry is not None:
+        if entry is not None and _cache_is_fresh(entry, ttl):
             smoke_results[t.id] = entry
             smoke_cached += 1
         else:
-            smoke_skipped += 1
+            smoke_fresh.append((t, t.id))
 
-    if smoke_made > 0:
+    if smoke_fresh:
+        with ThreadPoolExecutor(max_workers=min(n_workers, len(smoke_fresh))) as ex:
+            future_to_key = {
+                ex.submit(
+                    _smoke_call, t.model, t.provider, runner=smoke_runner,
+                ): key
+                for t, key in smoke_fresh
+            }
+            for fut in as_completed(future_to_key):
+                key = future_to_key[fut]
+                result = fut.result()
+                result["smoke_ts"] = now
+                cache[key] = result
+                smoke_results[key] = result
+                smoke_made += 1
         _save_cache(c_path, cache)
 
-    # Vision calls with cache (only for vision-capable models)
+    # ---- Vision calls ----
+    # Same two-phase pattern, but the unit of work is one
+    # (model, fixture) pair. Vision is the cost center (~31s/call,
+    # 10 models x 4 fixtures = 40 calls), so parallelism matters
+    # most here.
     v_dir = vision_fixtures_dir or _default_vision_dir()
-    vision_results: dict[str, list[dict[str, Any]]] = {}
-    vision_made = 0
-    vision_cached = 0
-    vision_models = 0
     vision_dir_found = v_dir.is_dir()
+
+    # Build the full per-model fixture plan first, classifying each
+    # (model, fixture) slot as fresh / cached / skipped / missing.
+    # This keeps the ordering and the "fixture missing" handling
+    # identical to the old sequential loop.
+    vision_plan: dict[str, list[dict[str, Any]]] = {}  # t.id -> slots
+    vision_fresh: list[tuple[str, str, str, str, list[str], str, str]] = []
+    #                   model   prov   img    q    expected  cache_key  t.id
+    vision_models = 0
 
     for t in targets:
         caps = _enrich_capabilities(t.model, models_dev)
         if not caps.get("vision"):
             continue
         vision_models += 1
-        model_vision: list[dict[str, Any]] = []
+        slots: list[dict[str, Any]] = []
         for img_rel, question, expected, label in VISION_FIXTURES:
             img_path = v_dir / img_rel
             if not vision_dir_found or not img_path.exists():
-                model_vision.append({
+                slots.append({
                     "fixture": label,
                     "ok": False,
                     "error": f"fixture missing: {img_path}",
@@ -696,24 +738,57 @@ def run(
                 continue
             ck = _vision_cache_key(t.id, label)
             entry = cache.get(ck)
-            if vision and (entry is None or not _cache_is_fresh(entry, ttl)):
-                result = _vision_call(
-                    t.model, t.provider, img_path, question, expected,
+            if vision and entry is not None and _cache_is_fresh(entry, ttl):
+                slots.append({"fixture": label, **entry})
+            elif vision:
+                # Fresh call needed — record the args, fill slot later.
+                slots.append({"fixture": label, "__pending__": ck})
+                vision_fresh.append(
+                    (t.model, t.provider, str(img_path), question, expected, ck, t.id)
+                )
+            else:
+                slots.append({"fixture": label, "skipped": True})
+        vision_plan[t.id] = slots
+    vision_made = 0
+    vision_cached = sum(
+        1 for slots in vision_plan.values()
+        for s in slots
+        if not s.get("__pending__") and not s.get("skipped") and not s.get("error")
+    )
+
+    if vision_fresh:
+        with ThreadPoolExecutor(max_workers=min(n_workers, len(vision_fresh))) as ex:
+            future_to_meta = {}
+            for model, prov, img, q, expected, ck, tid in vision_fresh:
+                fut = ex.submit(
+                    _vision_call, model, prov, Path(img), q, expected,
                     runner=vision_runner,
                 )
+                future_to_meta[fut] = (ck, tid, model)
+            for fut in as_completed(future_to_meta):
+                ck, tid, _model = future_to_meta[fut]
+                result = fut.result()
                 result["smoke_ts"] = now
                 cache[ck] = result
-                model_vision.append({"fixture": label, **result})
                 vision_made += 1
-            elif vision and entry is not None:
-                model_vision.append({"fixture": label, **entry})
-                vision_cached += 1
-            else:
-                model_vision.append({"fixture": label, "skipped": True})
-        vision_results[t.id] = model_vision
-
-    if vision_made > 0:
         _save_cache(c_path, cache)
+
+    # Merge fresh results into the plan slots, replacing __pending__.
+    for tid, slots in vision_plan.items():
+        for slot in slots:
+            ck = slot.pop("__pending__", None)
+            if ck is not None:
+                slot.update(cache[ck])
+
+    vision_results = vision_plan
+    vision_cached = sum(
+        1 for slots in vision_results.values()
+        for s in slots
+        if not s.get("__pending__") and not s.get("skipped")
+        and not s.get("error") and "fixture" in s
+    ) - vision_made
+    if vision_cached < 0:
+        vision_cached = 0
 
     # Assemble per-model report
     per_model: list[dict[str, Any]] = []
@@ -746,6 +821,7 @@ def run(
         "state_db": str(paths.state_db),
         "window_days": days,
         "ttl_seconds": ttl,
+        "jobs": n_workers,
         "smoke_enabled": smoke,
         "smoke_calls_made": smoke_made,
         "smoke_calls_cached": smoke_cached,
@@ -941,6 +1017,7 @@ def show_resolution(
     cache_path: Path | None = None,
     config_path: Path | None = None,
     vision_fixtures_dir: Path | None = None,
+    jobs: int = DEFAULT_JOBS,
 ) -> str:
     """Pretty-print the resolved config + discovery preview."""
     if config_path is not None:
@@ -957,6 +1034,7 @@ def show_resolution(
         f"cache:       {c_path}",
         f"window_days: {days}",
         f"ttl_seconds: {ttl} ({ttl // 60} min)",
+        f"jobs:        {jobs}",
         f"models_dev:  {_MODELS_DEV_CACHE}",
         f"vision_dir:  {v_dir}",
         "",

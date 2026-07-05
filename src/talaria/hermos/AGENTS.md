@@ -272,7 +272,9 @@ its findings (anomaly + config_suggestion) are emitted under the
   are valid). The report summary carries `vision_enabled`,
   `vision_models` (count of vision-capable discovered models),
   `vision_calls_made`, `vision_calls_cached`, `vision_dir`, and
-  `vision_dir_found`.
+  `vision_dir_found`. Smoke and vision calls run in parallel via
+  `ThreadPoolExecutor` (default `DEFAULT_JOBS = 8`; `--jobs N` to tune,
+  `--jobs 1` for sequential). The report summary carries `jobs`.
 - `refresh_catalog` reports use `ok: bool` instead of `fired` because
   there is no alert condition — there is only "refresh succeeded" vs.
   "tool error". Exit code 2 covers all failure modes
@@ -529,7 +531,9 @@ its findings (anomaly + config_suggestion) are emitted under the
   `hermes chat --image` and asserts the model reads it correctly
   (counting, OCR, spatial reasoning, brand-logo recognition).
   `--no-vision` disables vision calls; `--vision-fixtures-dir`
-  overrides the fixture path. Surfaced as
+  overrides the fixture path. Smoke and vision calls run in parallel
+  via `ThreadPoolExecutor` (default `DEFAULT_JOBS = 8`; `--jobs N` to
+  tune, `--jobs 1` for sequential). Surfaced as
   `talaria hermes benchmark`. Read-only.
 - `diagnose_llm.py` — curator-model subprocess runner. Resolves
   the curator model + provider from the profile config at runtime

@@ -432,6 +432,145 @@ class TestRun:
         assert smoke["ok"] is False
 
 
+# ---------------- Parallelism (jobs) ----------------
+
+class TestParallelism:
+    """Smoke and vision calls must actually overlap when jobs > 1.
+
+    Each test uses a runner that sleeps a fixed duration, then
+    asserts the wall-clock is well below the sequential sum.
+    """
+
+    def test_smoke_calls_run_in_parallel(self, tmp_path: Path) -> None:
+        """N smoke calls at jobs=N finish in ~one delay, not N*delay."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        # 4 models so we can see a 4x speedup
+        config = _write_config(tmp_path, {
+            "model": {
+                "default": "org/a",
+                "aliases": {"b": "org/b", "c": "org/c", "d": "org/d"},
+            },
+            "provider": "prov",
+        })
+        paths = _paths(tmp_path, state_db=db)
+        delay = 0.4
+
+        def slow_runner(prompt, *, model, provider, timeout, **kw):
+            time.sleep(delay)
+            return 0, '{"ok": true}', ""
+
+        t0 = time.time()
+        report = benchmark.run(
+            paths, days=7, smoke=True, smoke_runner=slow_runner,
+            config_path=config, cache_path=tmp_path / "cache.json",
+            jobs=4,
+        )
+        elapsed = time.time() - t0
+
+        assert report["smoke_calls_made"] == 4
+        # Sequential would be ~1.6s (4 * 0.4). Parallel with 4
+        # workers should be ~0.4s. Allow generous slack for CI /
+        # scheduler jitter but prove the calls overlapped.
+        assert elapsed < delay * 2, (
+            f"smoke calls did not run in parallel: elapsed={elapsed:.2f}s, "
+            f"expected < {delay * 2:.2f}s (4 calls x {delay}s at jobs=4)"
+        )
+
+    def test_vision_calls_run_in_parallel(self, tmp_path: Path, monkeypatch) -> None:
+        """Vision fixture calls overlap when jobs covers them."""
+        monkeypatch.setattr(benchmark, "_load_models_dev", _vision_models_dev)
+        config = _write_config(tmp_path, {
+            "model": {"default": "org/vision-model"},
+            "provider": "prov",
+        })
+        paths = _paths(tmp_path, state_db=tmp_path / "state.db")
+        v_dir = _make_vision_fixtures(tmp_path)
+        delay = 0.4
+
+        def slow_vision(prompt, *, model, provider, timeout, image, **kw):
+            time.sleep(delay)
+            return _good_vision_runner_factory()(prompt, model=model,
+                provider=provider, timeout=timeout, image=image)
+
+        t0 = time.time()
+        report = benchmark.run(
+            paths, days=7, smoke=False, vision=True,
+            vision_runner=slow_vision,
+            config_path=config, cache_path=tmp_path / "cache.json",
+            vision_fixtures_dir=v_dir,
+            jobs=len(benchmark.VISION_FIXTURES),
+        )
+        elapsed = time.time() - t0
+
+        n = len(benchmark.VISION_FIXTURES)
+        assert report["vision_calls_made"] == n
+        # Sequential would be n*delay; parallel with n workers
+        # should be ~delay.
+        assert elapsed < delay * 2, (
+            f"vision calls did not run in parallel: elapsed={elapsed:.2f}s, "
+            f"expected < {delay * 2:.2f}s ({n} calls x {delay}s at jobs={n})"
+        )
+
+    def test_jobs_one_is_sequential(self, tmp_path: Path) -> None:
+        """jobs=1 restores the old sequential wall-clock."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        config = _write_config(tmp_path, {
+            "model": {
+                "default": "org/a",
+                "aliases": {"b": "org/b"},
+            },
+            "provider": "prov",
+        })
+        paths = _paths(tmp_path, state_db=db)
+        delay = 0.3
+
+        def slow_runner(prompt, *, model, provider, timeout, **kw):
+            time.sleep(delay)
+            return 0, '{"ok": true}', ""
+
+        t0 = time.time()
+        report = benchmark.run(
+            paths, days=7, smoke=True, smoke_runner=slow_runner,
+            config_path=config, cache_path=tmp_path / "cache.json",
+            jobs=1,
+        )
+        elapsed = time.time() - t0
+
+        assert report["smoke_calls_made"] == 2
+        # 2 calls at jobs=1 -> ~0.6s, definitely > one delay.
+        assert elapsed >= delay * 1.5, (
+            f"jobs=1 did not run sequentially: elapsed={elapsed:.2f}s, "
+            f"expected >= {delay * 1.5:.2f}s"
+        )
+
+    def test_jobs_in_report(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {
+            "model": {"default": "org/a"},
+            "provider": "prov",
+        })
+        paths = _paths(tmp_path, state_db=tmp_path / "state.db")
+        report = benchmark.run(
+            paths, days=7, smoke=False,
+            config_path=config, cache_path=tmp_path / "cache.json",
+            jobs=3,
+        )
+        assert report["jobs"] == 3
+
+    def test_default_jobs(self, tmp_path: Path) -> None:
+        config = _write_config(tmp_path, {
+            "model": {"default": "org/a"},
+            "provider": "prov",
+        })
+        paths = _paths(tmp_path, state_db=tmp_path / "state.db")
+        report = benchmark.run(
+            paths, days=7, smoke=False,
+            config_path=config, cache_path=tmp_path / "cache.json",
+        )
+        assert report["jobs"] == benchmark.DEFAULT_JOBS
+
+
 # ---------------- Vision benchmark ----------------
 
 class TestVisionMatching:
