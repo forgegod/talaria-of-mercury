@@ -1,0 +1,36 @@
+{
+  "count_grid": {
+    "total_circles": "10",
+    "red_circles": "4",
+    "blue_circles": "2",
+    "green_circles": "2",
+    "orange_circles": "1",
+    "purple_circles": "1",
+    "total_squares": "4",
+    "description": "10 circles (4 red, 2 blue, 2 green, 1 orange, 1 purple), 4 grey squares"
+  },
+  "error_card": {
+    "error_code": "ERR_4042",
+    "module": "agent.compression",
+    "retry_count": "3",
+    "last_status": "failed",
+    "description": "Runtime error card with code ERR_4042 in agent.compression, 3 retries"
+  },
+  "spatial_arrow": {
+    "pointed_box": "B",
+    "box_a_position": "left",
+    "box_b_position": "center-top",
+    "box_c_position": "center-bottom",
+    "box_d_position": "right",
+    "description": "Arrow points to box B; A is left, C is below B, D is right"
+  },
+  "logo": {
+    "wordmark": "TALARIA",
+    "icon": "winged sandals / wings",
+    "dominant_colour": "gold (#ffc72c)",
+    "secondary_colour": "amber (#f9a23a)",
+    "image_used": "logo/logo-512.png",
+    "source_svg": "logo/logo.svg",
+    "description": "Talaria brand lockup: winged-sandal glyph + TALARIA wordmark. Gold primary fill, amber bicolour band. The SVG is the source of truth but vision models cannot read SVG, so the benchmark sends the rasterised logo-512.png."
+  }
+}
