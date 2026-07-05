@@ -10,8 +10,8 @@ from __future__ import annotations
 from talaria.hermos import (
     auxiliary,
     context_cache_fix,
+    diagnose,
     log_rotate,
-    moa_truncation,
     refresh_catalog,
     serve_stop,
     skill_install,
@@ -20,8 +20,8 @@ from talaria.hermos import (
 __all__ = [
     "auxiliary",
     "context_cache_fix",
+    "diagnose",
     "log_rotate",
-    "moa_truncation",
     "refresh_catalog",
     "serve_stop",
     "skill_install",
