@@ -62,3 +62,8 @@ addopts = "-q"
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]
+
+[dependency-groups]
+dev = [
+    "pillow>=12.3.0",
+]
