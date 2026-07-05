@@ -36,12 +36,12 @@ class TestCollect:
         root2 = completion.collect(build_parser())
         assert len(root1.subcommands) == len(root2.subcommands)
 
-    def test_hermes_group_has_four_features(self) -> None:
+    def test_hermes_group_has_all_features(self) -> None:
         root = completion.collect(build_parser())
         hermes = next(s for s in root.subcommands if s.name == "hermes")
         names = {s.name for s in hermes.subcommands}
         assert names == {
-            "moa-truncation", "refresh-catalog", "fix-context-cache",
+            "diagnose", "benchmark", "refresh-catalog", "fix-context-cache",
             "serve-stop", "log-rotate",
         }
 
@@ -59,24 +59,24 @@ class TestCollect:
 
     def test_leaf_subcommand_has_options(self) -> None:
         root = completion.collect(build_parser())
-        moa = self._find(root, ["hermes", "moa-truncation"])
-        assert moa is not None
-        flag_set = {f for opt in moa.options for f in opt.flags}
+        diag = self._find(root, ["hermes", "diagnose"])
+        assert diag is not None
+        flag_set = {f for opt in diag.options for f in opt.flags}
         assert "--json" in flag_set
         assert "--days" in flag_set
 
     def test_option_takes_arg_detected(self) -> None:
         root = completion.collect(build_parser())
-        moa = self._find(root, ["hermes", "moa-truncation"])
-        assert moa is not None
-        days = next(opt for opt in moa.options if "--days" in opt.flags)
+        diag = self._find(root, ["hermes", "diagnose"])
+        assert diag is not None
+        days = next(opt for opt in diag.options if "--days" in opt.flags)
         assert days.takes_arg is True
 
     def test_store_true_option_takes_no_arg(self) -> None:
         root = completion.collect(build_parser())
-        moa = self._find(root, ["hermes", "moa-truncation"])
-        assert moa is not None
-        json_opt = next(opt for opt in moa.options if "--json" in opt.flags)
+        diag = self._find(root, ["hermes", "diagnose"])
+        assert diag is not None
+        json_opt = next(opt for opt in diag.options if "--json" in opt.flags)
         assert json_opt.takes_arg is False
 
     def test_subparser_action_is_not_listed_as_option(self) -> None:
@@ -115,7 +115,7 @@ class TestBash:
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["moa-truncation", "refresh-catalog", "sync-env", "apply-auxiliary"]:
+        for name in ["diagnose", "benchmark", "refresh-catalog", "sync-env", "apply-auxiliary"]:
             assert name in script
 
     def test_contains_option_flags(self) -> None:
@@ -128,7 +128,7 @@ class TestBash:
         script = self.render()
         # Two-level paths like "config sync" must be quoted case patterns
         assert '"config sync")' in script
-        assert '"hermes moa-truncation")' in script
+        assert '"hermes diagnose")' in script
 
     def test_root_branch_not_emitted_first(self) -> None:
         # The root (lineage=[]) must NOT produce a "*" branch before the
@@ -170,9 +170,9 @@ echo "TOP:${COMPREPLY[*]}"
 COMP_WORDS=(talaria config ""); COMP_CWORD=2
 _talaria_completion
 echo "CONFIG:${COMPREPLY[*]}"
-COMP_WORDS=(talaria hermes moa-truncation -); COMP_CWORD=3
+COMP_WORDS=(talaria hermes diagnose -); COMP_CWORD=3
 _talaria_completion
-echo "MOA_FLAGS:${COMPREPLY[*]}"
+echo "DIAG_FLAGS:${COMPREPLY[*]}"
 """
         result = subprocess.run(
             ["bash"],
@@ -220,7 +220,7 @@ class TestZsh:
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["moa-truncation", "refresh-catalog", "sync-env", "serve-stop"]:
+        for name in ["diagnose", "benchmark", "refresh-catalog", "sync-env", "serve-stop"]:
             assert name in script
 
     def test_contains_option_specs(self) -> None:

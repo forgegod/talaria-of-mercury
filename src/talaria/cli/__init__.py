@@ -2,7 +2,7 @@
 
 The top-level ``talaria`` entry point (:func:`main`) dispatches to a
 *feature group* (currently just ``hermes``) and then to the named
-feature (e.g. ``moa-truncation``). New feature groups add a new module
+feature (e.g. ``diagnose``). New feature groups add a new module
 in this package without touching the dispatcher.
 """
 
@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 
 import talaria
+from talaria.hermos import diagnose as diagnose_module
 from talaria.hermos import refresh_catalog as refresh_catalog_module
+from talaria.hermos import benchmark as benchmark_module
 from talaria.paths import resolve_paths
 from talaria.sync import (
     SyncOptions,
@@ -64,26 +66,101 @@ def cmd_paths(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------- Subcommand: talaria hermes moa-truncation ----------
-def cmd_hermes_moa_truncation(args: argparse.Namespace) -> int:
-    from talaria.hermos import moa_truncation
+# ---------- Subcommand: talaria hermes diagnose ----------
+def _parse_csv(value: str) -> tuple[str, ...]:
+    """Parse a comma-separated string into a tuple of trimmed, non-empty ids."""
+    return tuple(p.strip() for p in value.split(",") if p.strip())
+
+
+def cmd_hermes_diagnose(args: argparse.Namespace) -> int:
+    from talaria.hermos import diagnose
     paths = resolve_paths(
         profile_flag=args.profile,
         state_db_flag=args.state_db,
         log_dir_flag=args.log_dir,
     )
     if args.show_resolution:
-        print(moa_truncation.show_resolution(paths))
+        print(diagnose.show_resolution(paths))
         return 0
-    report = moa_truncation.run(paths, days=args.days, since=args.since)
+    only = _parse_csv(args.only) if args.only else ()
+    skip = _parse_csv(args.skip) if args.skip else ()
+    try:
+        report = diagnose.run(
+            paths,
+            days=args.days,
+            since=args.since,
+            include_curator=args.include_curator,
+            only=only,
+            skip=skip,
+            free_flight=not args.no_free_flight,
+            apply_suggestions=args.apply_suggestions,
+            apply_dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        print(f"talaria hermes diagnose: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         _print_json(report)
         return 1 if report["fired"] else 0
-    if args.verbose:
-        exit_code, text = moa_truncation.render_human(report)
+    if not args.quiet:
+        exit_code, text = diagnose.render_human(report)
         print(text)
         return exit_code
     return 1 if report["fired"] else 0
+
+
+# ---------- Subcommand: talaria hermes benchmark ----------
+def cmd_hermes_benchmark(args: argparse.Namespace) -> int:
+    from talaria.hermos import benchmark
+    paths = resolve_paths(
+        profile_flag=args.profile,
+        state_db_flag=args.state_db,
+    )
+    if args.show_resolution:
+        print(benchmark.show_resolution(
+            paths,
+            days=args.days,
+            ttl=args.ttl,
+            config_path=Path(args.config) if args.config else None,
+            vision_fixtures_dir=Path(args.vision_fixtures_dir) if args.vision_fixtures_dir else None,
+        ))
+        return 0
+    report = benchmark.run(
+        paths,
+        days=args.days,
+        ttl=args.ttl,
+        smoke=not args.no_smoke,
+        vision=not args.no_vision,
+        config_path=Path(args.config) if args.config else None,
+        cache_path=Path(args.cache) if args.cache else None,
+        vision_fixtures_dir=Path(args.vision_fixtures_dir) if args.vision_fixtures_dir else None,
+    )
+    if args.json:
+        _print_json(report)
+        # Smoke or vision fail → exit 1; otherwise 0.
+        any_fail = any(
+            (m.get("smoke") or {}).get("ok") is False
+            or any(
+                (vf.get("ok") is False and not vf.get("skipped"))
+                for vf in (m.get("vision") or [])
+            )
+            for m in report.get("per_model", [])
+        )
+        return 1 if any_fail else 0
+    if not args.quiet:
+        exit_code, text = benchmark.render_human(report)
+        print(text)
+        return exit_code
+    # --quiet: exit-code only. Smoke or vision fail → 1.
+    any_fail = any(
+        (m.get("smoke") or {}).get("ok") is False
+        or any(
+            (vf.get("ok") is False and not vf.get("skipped"))
+            for vf in (m.get("vision") or [])
+        )
+        for m in report.get("per_model", [])
+    )
+    return 1 if any_fail else 0
 
 
 # ---------- Subcommand: talaria hermes refresh-catalog ----------
@@ -557,46 +634,174 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hermes_sub = hermes.add_subparsers(dest="hermes_command", required=True, metavar="COMMAND")
 
-    # talaria hermes moa-truncation
-    p_moa = hermes_sub.add_parser(
-        "moa-truncation",
-        help="Verify the MoA truncation mitigation (signal A + signal B).",
+    # talaria hermes diagnose
+    p_diag = hermes_sub.add_parser(
+        "diagnose",
+        help="Run multi-detector profile anomaly scan (state.db + logs).",
         description=(
-            "Inspect state.db for high-output MoA sessions and scan "
-            "agent.log/errors.log for length-class truncation markers."
+            "Run every selected detector against the profile's state.db "
+            "and logs/. The free-flight curator pass (the operator's "
+            "configured _curator model analysing the assembled evidence) "
+            "runs by default — it is the only way the structured 11-detector "
+            "pass catches unknown-unknown anomalies and config improvements. "
+            "Pass --no-free-flight for pure deterministic results. "
+            "config_suggestion findings from the free-flight pass are "
+            "reported but never applied unless --apply-suggestions is passed."
         ),
     )
-    p_moa.add_argument(
-        "--days", type=int, default=2,
+    p_diag.add_argument(
+        "--days", type=int, default=diagnose_module.DEFAULT_LOOKBACK_DAYS,
         help="Look-back window in days (default: 2).",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
         "--since", type=str, default=None,
         help="ISO date YYYY-MM-DD overriding --days.",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
+        "--include-curator", action="store_true",
+        help="Also walk logs/curator/<ts>/ snapshot trees.",
+    )
+    p_diag.add_argument(
+        "--only", type=str, default="",
+        help=(
+            "Comma-separated list of detector ids to run exclusively "
+            f"(e.g. {diagnose_module.TRUNCATION_OUTPUT},{diagnose_module.ZOMBIE_SESSIONS})."
+        ),
+    )
+    p_diag.add_argument(
+        "--skip", type=str, default="",
+        help="Comma-separated list of detector ids to skip.",
+    )
+    p_diag.add_argument(
+        "--no-free-flight", action="store_true",
+        help=(
+            "Skip the free-flight curator pass; the report uses only "
+            "the deterministic 11-detector verdicts. Off by default; "
+            "the operator passes this for pure-deterministic runs or "
+            "to keep the command hermes-free (no model call)."
+        ),
+    )
+    p_diag.add_argument(
+        "--apply-suggestions", action="store_true",
+        help=(
+            "Apply config_suggestion findings from the free-flight "
+            "pass to the active profile's config.yaml. Atomic backup "
+            "(config.yaml.bak) is written first; the change is reported "
+            "in the apply.* fields of the JSON report. Off by default; "
+            "the operator reviews suggestions on a dry-run first."
+        ),
+    )
+    p_diag.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "Preview the apply path without writing bytes. Implies "
+            "--apply-suggestions (so the diff is computed) but the "
+            "write step is suppressed. The proposed diff is reported "
+            "in apply.dry_run_diff."
+        ),
+    )
+    p_diag.add_argument(
         "--profile", help="Hermes profile name to inspect.",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
         "--state-db", type=Path,
         help="Explicit path to state.db (overrides --profile resolution).",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
         "--log-dir", type=Path,
         help="Explicit path to logs/ (overrides --profile resolution).",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
         "--json", action="store_true", help="Emit JSON instead of human-readable output.",
     )
-    p_moa.add_argument(
+    p_diag.add_argument(
         "--show-resolution", action="store_true",
         help="Print which profile and paths were resolved, then exit.",
     )
-    p_moa.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Print the human-readable report on stdout (default: silent, exit code only).",
+    p_diag.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Suppress the human-readable report; exit code only (default: report printed).",
     )
-    p_moa.set_defaults(func=cmd_hermes_moa_truncation)
+    p_diag.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report (default behaviour; kept for convenience).",
+    )
+    p_diag.set_defaults(func=cmd_hermes_diagnose, quiet=False)
+
+    # talaria hermes benchmark
+    p_bench = hermes_sub.add_parser(
+        "benchmark",
+        help="Report per-model health, cost, latency, and capabilities.",
+        description=(
+            "Aggregate per-model stats from state.db (call counts, token "
+            "usage, cost, first-response latency, reasoning level) and "
+            "enrich with capability data from models.dev. When the smoke "
+            "cache is stale (default TTL 30 min), makes one fresh JSON "
+            "smoke call per discovered model. The report is read-only."
+        ),
+    )
+    p_bench.add_argument(
+        "--days", type=int, default=benchmark_module.DEFAULT_LOOKBACK_DAYS,
+        help=f"Look-back window in days for state.db aggregation (default: {benchmark_module.DEFAULT_LOOKBACK_DAYS}).",
+    )
+    p_bench.add_argument(
+        "--ttl", type=int, default=benchmark_module.DEFAULT_TTL_SECONDS,
+        help=(
+            f"Cache TTL in seconds for smoke results (default: "
+            f"{benchmark_module.DEFAULT_TTL_SECONDS // 60} min). Smoke "
+            "calls within the TTL window reuse the cached result."
+        ),
+    )
+    p_bench.add_argument(
+        "--no-smoke", action="store_true",
+        help="Skip all JSON smoke calls; report only state.db data.",
+    )
+    p_bench.add_argument(
+        "--no-vision", action="store_true",
+        help=(
+            "Skip all vision-capability checks. By default, every "
+            "discovered model whose capabilities include vision (per "
+            "models.dev) is tested against the vision fixture images."
+        ),
+    )
+    p_bench.add_argument(
+        "--vision-fixtures-dir", type=Path, default=None,
+        help=(
+            "Override the vision fixture-image directory (default: "
+            "assets/benchmark/vision/ relative to the repository root)."
+        ),
+    )
+    p_bench.add_argument(
+        "--profile", help="Hermes profile name to inspect.",
+    )
+    p_bench.add_argument(
+        "--state-db", type=Path,
+        help="Explicit path to state.db (overrides --profile resolution).",
+    )
+    p_bench.add_argument(
+        "--config", type=Path,
+        help="Explicit path to config.yaml (overrides --profile resolution).",
+    )
+    p_bench.add_argument(
+        "--cache", type=Path,
+        help="Explicit path to the benchmark cache file.",
+    )
+    p_bench.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_bench.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print resolved paths + discovered models and exit.",
+    )
+    p_bench.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="Suppress the human-readable report; exit code only.",
+    )
+    p_bench.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report (default behaviour; kept for convenience).",
+    )
+    p_bench.set_defaults(func=cmd_hermes_benchmark, quiet=False)
 
     # talaria hermes refresh-catalog
     p_catalog = hermes_sub.add_parser(
