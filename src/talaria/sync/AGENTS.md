@@ -97,7 +97,13 @@ profiles.
 - `context_cache.py` — `context_length_cache.yaml` phase.
   Source-wins merge.
 - `mcp_serve.py` — `mcp_servers` injection (delegates to
-  `config.py`).
+  `config.py`). Writes an `mcp_servers:<name>` block into the
+  target's `config.yaml` pointing at `http://<host>:<port>/sse`
+  with `transport: sse`. The operator-side MCP proxy that
+  actually serves that URL lives outside this repo; see
+  `docs/MCP-PROXY.md` for the matching spec (target:
+  `~/.hermes/profiles/hermes-vc/bin/mcp_reverse_proxy.py`, port
+  8000).
 - `dotpath.py` — get/set/del/list helpers for `--exclude` /
   `--only` path filters.
 - `yaml_io.py` — load/dump/validate YAML.

@@ -10,9 +10,11 @@ The name is deliberate. In the [Greek mythos](https://en.wikipedia.org/wiki/Tala
 
 ## Highlights
 
-Talaria gives Hermes operators a single installable CLI for everything the agent itself doesn't cover — profile-aware inspection, model catalog refreshes, skill lifecycle management, and controlled configuration sync across profiles:
+Talaria gives Hermes operators a single installable CLI for everything the agent itself doesn't cover — multi-detector anomaly diagnosis, per-model benchmarking, skill lifecycle management, and controlled configuration sync across profiles:
 
-- 🩺 **Verify agent health** — check for MoA truncation regressions and repair stale context-length caches.
+- 🩺 **Diagnose agent anomalies** — 11 structured detectors scan `state.db` + `logs/` for truncation, compression stalls, zombie sessions, cost spikes, and more, plus a default-on free-flight pass that hands the assembled evidence to the operator's curator model for open-ended anomaly detection and config suggestions.
+- 📊 **Benchmark every model** — per-model health, cost, latency, reasoning level, and capabilities (vision, tool-call, structured-output, context/output limits, per-token cost) for every `(model, provider)` pair the profile routes through. Combines `state.db` session aggregation, `models.dev` capability data, and cached JSON smoke calls — one deduplicated call per unique pair, not per config reference.
+- 👁️ **Verify vision capability** — the benchmark automatically sends real images to every vision-capable model (per models.dev) and asserts the model reads them correctly: counting, OCR, spatial reasoning, and brand-logo recognition. `--no-vision` disables the checks.
 - 🧩 **Manage skills at scale** — recursively install, categorize, and uninstall third-party skill collections from GitHub or skills.sh, with collision detection and fuzzy similarity matching to prevent silent overwrites.
 - 🔄 **Keep profiles in sync** — copy config, SOUL.md, skills, `.env`, and context cache between profiles; refresh `.env` values from the live environment; derive model aliases from auxiliary pins.
 - 🗂️ **Refresh model catalogs** — fetch and reshape gateway-backed model manifests into Hermes' provider cache.
@@ -27,7 +29,8 @@ Every command follows the same conventions: profile-aware path resolution, struc
 |---------|-------|---------|
 | `talaria paths` | — | Print the resolved profile + paths Talaria would inspect. |
 | `talaria completion <shell>` | — | Print a bash or zsh shell completion script. |
-| `talaria hermes moa-truncation` | inspection | Verify the MoA truncation mitigation (Signal A + Signal B). |
+| `talaria hermes diagnose` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
+| `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. |
 | `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
 | `talaria hermes fix-context-cache` | maintenance | Repair curated known-bad entries in a profile's context cache. |
 | `talaria hermes serve-stop` | maintenance | Detect and stop the Hermes dashboard/serve backend by port. |
@@ -42,14 +45,21 @@ Every command follows the same conventions: profile-aware path resolution, struc
 ## Install
 
 ```bash
-# from a clone of this repo
+# from a clone of this repo (uv is the recommended tool — the repo
+# ships a uv.lock so the dependency resolution is reproducible)
+uv sync
+
+# editable install with the dev extra (pytest + pytest-cov)
+uv pip install -e ".[dev]"
+
+# or with plain pip
 pip install -e ".[dev]"
 
 # or, once published
 pip install talaria
 ```
 
-The `[dev]` extra pulls in `pytest` and `pytest-cov` for the test suite.
+The `[dev]` extra pulls in `pytest` and `pytest-cov` for the test suite. The `[dependency-groups] dev` group additionally pulls in `pillow` (used only by `assets/benchmark/vision/generate_vision_fixtures.py` to regenerate the fixture images).
 
 ## Conventions
 
@@ -79,19 +89,41 @@ Talaria does **not** consume `HERMES_HOME` for resolution. That env var is set b
 
 ### Output
 
-Talaria is **silent by default** so it scripts cleanly. Every data-producing subcommand accepts:
+Talaria follows a **two-tier output contract** so it scripts cleanly while
+remaining useful interactively.
 
-- `--json` — emit a stable JSON document to stdout (always prints, suitable for cron, dashboards, and other agents).
-- `--show-resolution` — print the resolved paths / sources and exit 0 without running the feature (always prints, useful for debugging).
-- `-v`, `--verbose` — print the human-readable report to stdout. Without this flag the default run is exit code only; stdout stays empty on success and the exit code is the only signal. Errors still go to stderr.
+**Silent by default, opt-in to print** — most commands are exit-code-only
+when run without flags. `--verbose` (`-v`) prints the human-readable report.
+This is the pattern for: `hermes refresh-catalog`, `hermes fix-context-cache`,
+`hermes serve-stop`, `skills install`, `skills uninstall`, `skills create-category`,
+`config sync`, `config apply-auxiliary`, `config sync-env`.
 
-Two commands print by default with no `--verbose` needed, because their only job is to print:
+**Print by default, opt-out to suppress** — inspection commands whose report
+*is* the answer print on stdout automatically. Pass `--quiet` (`-q`) to suppress
+and get the exit code only. This is the pattern for:
 
 - `talaria paths` — its output *is* the resolved profile + paths.
-- `talaria hermes log-rotate` — explicit-only: with no action flags it reports scanned size/age and exits 0 without writing. The report is the answer.
-- `talaria completion` — its output *is* the completion script the operator asked for.
-- `talaria config sync --list` — its output *is* the dot-path list the operator asked for.
-- `--json` and `--show-resolution` on any other command — the operator asked for that channel.
+- `talaria hermes diagnose` — the 11-detector anomaly report.
+- `talaria hermes benchmark` — the per-model health/cost/capability report.
+- `talaria hermes log-rotate` — explicit-only: with no action flags it reports
+  scanned size/age and exits 0 without writing.
+- `talaria completion` — its output *is* the completion script the operator
+  asked for.
+- `talaria config sync --list` — its output *is* the dot-path list the
+  operator asked for.
+
+On the print-by-default commands `-v`/`--verbose` is a kept as a no-op
+(convenience / muscle memory), not an alternative output channel — `-q` is
+the real suppressor.
+
+Both tiers share the explicit data channels, which always print regardless of tier:
+
+- `--json` — emit a stable JSON document to stdout (suitable for cron, dashboards,
+  and other agents).
+- `--show-resolution` — print the resolved paths / sources and exit 0 without
+  running the feature (useful for debugging).
+
+Errors always go to stderr.
 
 ### Debug helpers
 
@@ -103,8 +135,14 @@ Every feature with path resolution accepts `--show-resolution`: it prints what T
 # Inspect which profile + paths Talaria would use
 talaria paths
 
-# Verify the MoA truncation mitigation against the active profile
-talaria hermes moa-truncation
+# Run the multi-detector profile anomaly scan against the active profile
+talaria hermes diagnose
+
+# Preview config suggestions from the free-flight curator pass without writing
+talaria hermes diagnose --apply-suggestions --dry-run
+
+# Benchmark every model: health + cost + latency + capabilities + vision
+talaria hermes benchmark
 
 # Refresh the Kilo Code gateway model catalog
 talaria hermes refresh-catalog --gateway kilocode
@@ -132,16 +170,17 @@ talaria hermes serve-stop
 eval "$(talaria completion zsh)"
 ```
 
-## Feature: `talaria hermes moa-truncation`
+## Feature: `talaria hermes diagnose`
 
-Verifies the MoA truncation mitigation by running two signals against the resolved profile's `state.db` and `logs/`. Both signals must pass for the command to exit 0.
+Runs 11 structured detectors against the resolved profile's `state.db` and `logs/`, plus a default-on free-flight curator pass that hands the assembled evidence to the operator's configured `_curator` model for open-ended anomaly detection and config suggestions. The free-flight pass is the only way the structured detectors catch unknown-unknown anomalies — pass `--no-free-flight` for pure deterministic results. Use `--apply-suggestions` to write config-suggestion findings into the profile's `config.yaml` (atomic backup first; `--dry-run` previews the diff).
 
 ### Usage
 
 ```bash
-talaria hermes moa-truncation
-talaria hermes moa-truncation --profile hermes-vc
-talaria hermes moa-truncation --state-db /var/lib/hermes/state.db --log-dir /var/log/hermes --json --days 7
+talaria hermes diagnose
+talaria hermes diagnose --profile hermes-vc
+talaria hermes diagnose --no-free-flight --json --days 7
+talaria hermes diagnose --only truncation_output,zombie_sessions
 ```
 
 ### Flags
@@ -150,20 +189,92 @@ talaria hermes moa-truncation --state-db /var/lib/hermes/state.db --log-dir /var
 |------|---------|--------|
 | `--days N` | `2` | Sliding look-back window in days (UTC). |
 | `--since YYYY-MM-DD` | — | Absolute start date; overrides `--days`. |
+| `--only ID,ID,...` | all | Comma-separated detector id whitelist. |
+| `--skip ID,ID,...` | none | Comma-separated detector id blacklist. |
+| `--no-free-flight` | off | Skip the curator model pass; pure deterministic. |
+| `--apply-suggestions` | off | Write `config_suggestion` findings to `config.yaml` (atomic backup first). |
+| `--dry-run` | off | Preview the apply diff without writing. |
+| `--include-curator` | off | Walk `logs/curator/<ts>/` snapshot trees. |
 | `--profile NAME` | from env/file | Profile to inspect. |
 | `--state-db PATH` | resolved | Override the `state.db` path. |
 | `--log-dir PATH` | resolved | Override the `logs/` directory. |
 | `--json` | off | Emit JSON instead of human-readable output. |
-| `--show-resolution` | off | Print resolved paths and exit 0 without running the signals. |
-| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
+| `--show-resolution` | off | Print resolved paths + detector catalog and exit 0. |
+| `-q`, `--quiet` | off | Suppress the human-readable report; exit code only. |
+| `-v`, `--verbose` | off | No-op alias (default already prints the report); kept for convenience. |
 
-### Signals
+### Detectors
 
-**Signal A** — queries `state.db` for sessions exceeding the output-token alert threshold (default `64_000`). A regression here usually means a MoA preset's `max_tokens` is still too high.
+The 11 deterministic detectors cover: output-token truncation (SQL + log markers + finish_reason), stream drops, compression stale locks/failures, rewind storms, handoff errors, cost anomalies, zombie sessions, and ghost sessions. Exit code is 1 if any detector fires; 0 if clean. The free-flight curator pass is default-on and finds issues the deterministic rules don't know to look for.
 
-**Signal B** — scans `agent.log` and `errors.log` for length-truncation markers (`finish_reason='length'`, `Response truncated`, `hit max output tokens`). Only counts `WARNING`/`ERROR`/`CRITICAL` lines to avoid false positives from INFO echoes.
+## Feature: `talaria hermes benchmark`
 
-`fired: true` in JSON output is the consumer's signal to branch on the non-zero exit code.
+Reports per-model health, cost, latency, reasoning level, capabilities, and (for vision-capable models) image-reading verification for every model the profile routes through. Combines state.db session aggregation, capability data from `models.dev`, cached JSON smoke calls, and cached vision-capability checks.
+
+### Usage
+
+```bash
+# full report: state.db stats + capabilities + smoke + vision (cached for 30 min)
+talaria hermes benchmark
+
+# state.db only, no model calls at all
+talaria hermes benchmark --no-smoke --no-vision
+
+# JSON for scripting
+talaria hermes benchmark --json --no-smoke
+
+# inspect a specific profile
+talaria hermes benchmark --profile hermes-vc --days 1
+
+# skip vision checks only (keep smoke)
+talaria hermes benchmark --no-vision
+```
+
+### Flags
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `--days N` | `7` | Look-back window for state.db session aggregation. |
+| `--ttl SECONDS` | `1800` | Cache TTL for smoke + vision results (30 min). Within the window, cached results are reused. |
+| `--no-smoke` | off | Skip all JSON smoke calls; report only state.db data. |
+| `--no-vision` | off | Skip all vision-capability checks. By default, every discovered model whose capabilities include vision (per models.dev) is tested against the vision fixture images. |
+| `--vision-fixtures-dir PATH` | `assets/benchmark/vision/` | Override the vision fixture-image directory. |
+| `--profile NAME` | from env/file | Profile to inspect. |
+| `--state-db PATH` | resolved | Override the `state.db` path. |
+| `--config PATH` | resolved | Override the `config.yaml` path. |
+| `--cache PATH` | resolved | Override the cache file path. |
+| `--json` | off | Emit JSON instead of human-readable output. |
+| `--show-resolution` | off | Print resolved paths + discovered models and exit. |
+| `-q`, `--quiet` | off | Suppress the human-readable report; exit code only. |
+| `-v`, `--verbose` | off | No-op alias (default already prints the report); kept for convenience. |
+
+### What it reports per model
+
+For each unique `(model, provider)` pair discovered in `config.yaml`:
+
+- **Reasoning level** — from `sessions.model_config.reasoning_config.effort` (e.g. `low`, `medium`, `high`).
+- **Capabilities** — from `models.dev`: reasoning, tool-call, vision, structured-output, context/output limits, per-token cost. Matched by model slug so provider-prefix differences (`zai-coding/glm-5.2` vs `z-ai/glm-5.2`) resolve.
+- **Session stats** — call count, avg input/output/reasoning/cache tokens, total and per-session cost.
+- **First-response latency** — avg time from first user message to first assistant reply (time-to-first-token proxy).
+- **Smoke result** — fresh or cached: did the model return parseable JSON within the timeout?
+- **Vision results** — for vision-capable models only: per-fixture results showing whether the model correctly read and reasoned about each test image.
+
+Exit code is 1 if any model fails the smoke test OR any vision fixture fails; 0 if all pass.
+
+### Vision-capability benchmark
+
+Vision is integrated into the benchmark itself, not a separate command. Every discovered model whose capabilities include vision (per `models.dev`) is automatically tested against 4 fixture images, each with a deterministic ground-truth answer:
+
+| Fixture | What it tests |
+|---------|---------------|
+| `count_grid.png` | Counting + colour discrimination (10 circles, 4 red). |
+| `error_card.png` | OCR of structured error text (code ERR_4042, module agent.compression). |
+| `spatial_arrow.png` | Spatial reasoning + arrow direction (points to box B). |
+| `logo/logo-512.png` | Brand-logo recognition — reads the TALARIA wordmark, the winged-sandal glyph, and the gold palette. |
+
+Vision results are cached alongside smoke results in the same cache file (`$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`), keyed by `<model_id>::vision::<fixture_label>`. The fixture images live in `assets/benchmark/vision/` and can be overridden with `--vision-fixtures-dir`.
+
+Ground-truth entries support `|`-separated alternatives for visually-ambiguous fixtures — e.g. the stylised wing glyph may read as "wings", "winged", "sandal", or "butterfly" depending on the model, all of which are valid. Pass `--no-vision` to skip all vision checks.
 
 ## Feature: `talaria hermes refresh-catalog`
 
@@ -463,6 +574,9 @@ talaria config sync default --list
 | `-o`, `--only` | none | Copy only these paths. Mutually exclusive with `-e`. |
 | `--sync-skills` | all | Limit skills sync to categories or `category/skill-name` paths. |
 | `--add-mcp-serve` | off | Add an `mcp_servers` entry to target connecting to a Hermes SSE endpoint. |
+| `--mcp-serve-name NAME` | `hermes` | Name for the injected `mcp_servers` entry. |
+| `--mcp-serve-port N` | `9119` | Port for the Hermes SSE endpoint. |
+| `--mcp-serve-host HOST` | `localhost` | Host for the Hermes SSE endpoint. |
 | `--dry-run` | off | Preview changes without writing. **Apply by default.** |
 | `--no-backup` | off | Skip `.bak` backup before overwriting. |
 | `--force-config` | off | Overwrite target `config.yaml` even when source is not newer. |
@@ -565,30 +679,45 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 | Var | Effect |
 |-----|--------|
 | `HERMES_PROFILE` | Profile name to inspect when `--profile` is omitted. |
-| `XDG_CACHE_HOME` | Parent directory for the default catalog cache path. |
+| `XDG_CACHE_HOME` | Parent directory for the catalog cache and the benchmark smoke/vision cache (`$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`). |
 | `KILOCODE_API_KEY` | Kilo Code gateway API key used by `refresh-catalog --gateway kilocode` (also read from `~/.hermes/.env`). |
 | `GITHUB_TOKEN` / `GH_TOKEN` | Used by `skills install` for GitHub tree expansion and by similarity fetches for raw content access. |
 
+**Test-only env vars** (never documented in a production env-var table; see `tests/AGENTS.md` §Local Contracts):
+
+| Var | Effect |
+|-----|--------|
+| `_TESTING_TALARIA_RUN_MODEL_BENCH=1` | Opt-in: run the live model benchmark tests (`hermes chat` smoke + vision calls). Burns tokens. |
+| `_TESTING_TALARIA_SKIP_MODEL_BENCH=1` | Opt-out: force-skip live tests even when the opt-in is set. Wins over opt-in. |
+| `_TESTING_TALARIA_PROFILE_CONFIG=<path>` | Override the config.yaml path used by the live benchmark tests. |
+
 ## Adding a new feature
 
-Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermos/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermos/` when they operate on one profile's own files.
+Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermes/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermos/` when they operate on one profile's own files.
 
-1. Add `talaria/hermos/<feature>.py` exposing `run(paths, **opts)` and `render_human(report)`.
-2. Wire its argparse subparser into `talaria.cli.build_parser` and gate the
-   human-readable `print(...)` on `args.verbose` (add `-v, --verbose` to the
-   subparser) — Talaria is silent by default; only the exit code is emitted.
-3. Add tests under `tests/test_<feature>.py` using the shared `fake_hermes_root`
-   fixture. CLI tests that assert on human-readable stdout must pass
-   `--verbose` explicitly.
+1. Add `talaria/hermos/<feature>.py` exposing `run(paths, **opts) -> dict` and `render_human(report) -> tuple[int, str]`.
+2. Wire its argparse subparser into `talaria.cli.build_parser`. The feature's **output tier** decides the dispatch shape:
+   - **Silent-by-default** (maintenance/action commands): add `-v, --verbose` and gate the report print on `if args.verbose:`. Default run is exit code only.
+   - **Print-by-default** (inspection commands whose report *is* the answer): add `-q, --quiet` and `-v, --verbose` (no-op alias for muscle memory), set `set_defaults(func=cmd_xxx, quiet=False)`, and gate the report print on `if not args.quiet:`. Default run prints.
+   In both tiers, `--json` always prints and `--show-resolution` always prints + exits 0.
+3. Add tests under `tests/test_<feature>.py` using the shared `fake_hermes_root` fixture. CLI tests that assert on human-readable stdout must respect the tier: silent-by-default commands pass `--verbose` explicitly; print-by-default commands pass `-q/--quiet` to assert on the silent path.
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+# install (uv recommended — repo ships a uv.lock)
+uv sync && uv pip install -e ".[dev]"
+
+# run the full test suite (no live Hermes or network required by default)
 pytest
+
+# run just the benchmark feature tests
+pytest tests/test_benchmark.py
 ```
 
-The test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub `urllib.request.urlopen`; no real Kilo Code or GitHub calls happen during `pytest`.
+The default test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub `urllib.request.urlopen`; no real Kilo Code or GitHub calls happen during `pytest`.
+
+The **live model benchmark** (smoke + vision calls against real models via `hermes chat`) is gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` and skipped by default to avoid burning tokens. The vision fixtures (`assets/benchmark/vision/`) are checked into the repo; regenerate them with `uv run python assets/benchmark/vision/generate_vision_fixtures.py` (requires the `pillow` dev dependency).
 
 ## License
 

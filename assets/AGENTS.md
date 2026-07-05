@@ -226,3 +226,20 @@ background so it can be placed on any surface.
   (no-hallux + the three hallux variants) for side-by-side
   comparison.  Generated, NOT committed.  The canonical
   `logo.svg` / `logo-mark.svg` are not touched by `--drafts`.
+- `benchmark/vision/` — vision-capability benchmark fixtures
+  consumed by `talaria hermes benchmark`.  Contains 4 fixture
+  images with deterministic ground truth (`ground_truth.json`):
+  three Pillow-generated PNGs (`count_grid.png` for counting +
+  colour discrimination, `error_card.png` for OCR of structured
+  error text, `spatial_arrow.png` for spatial reasoning) produced
+  by `generate_vision_fixtures.py`, and the Talaria brand logo
+  (`logo/logo.svg` source + `logo-{256,512,1024}.png` rasters,
+  copied from `assets/`).  The benchmark sends `logo/logo-512.png`
+  (vision models cannot read SVG directly).  The fixture
+  directory is resolved at runtime by
+  `benchmark._default_vision_dir()` (relative to the repository
+  root) and can be overridden with `--vision-fixtures-dir`.
+  Ground-truth matching supports `|`-separated alternatives for
+  visually-ambiguous fixtures (e.g. the winged-sandal glyph may
+  read as "wings", "winged", "sandal", or "butterfly").  Tracked
+  in `tests/AGENTS.md` (`test_benchmark.py` child index).

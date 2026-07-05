@@ -10,7 +10,40 @@ caches.
 
 - Each feature is a single module exposing `run(paths, **opts) -> dict`
   and `render_human(report) -> tuple[int, str]`.
-- `moa_truncation` verifies output-token trends and length-class log markers.
+- `diagnose` is a multi-detector profile anomaly scan. It runs 11
+  structured detectors against the resolved profile's `state.db` and
+  `logs/`, plus a default-on free-flight pass that hands the model
+  raw evidence (sessions' message text + log lines + aggregate stats
+  + the profile's `config.yaml`) and asks it to find unknown-unknown
+  anomalies and config improvements. Surfaced as
+  `talaria hermes diagnose`.
+- `benchmark` is a per-model health/cost/latency/capability report.
+  It discovers every unique `(model, provider)` pair from
+  `config.yaml`, aggregates recent sessions from `state.db`, enriches
+  with capability data from `models_dev_cache.json`, and makes one
+  cached JSON smoke call per model when the cache is stale (default
+  TTL 30 min). The report is read-only. Surfaced as
+  `talaria hermes benchmark`.
+- `diagnose_llm` is the only place the diagnose feature talks to a
+  language model. **Nothing is hardcoded** — the module resolves
+  the curator model + provider from the active profile's
+  `config.yaml` at runtime via `resolve_curator_config(paths)`.
+  Resolution order: `auxiliary.curator.model` +
+  `auxiliary.curator.provider` → `model.aliases._curator` →
+  `model.default` + top-level `provider`. The resolved
+  `(model, provider)` pair is passed to `hermes_chat(prompt,
+  model=..., provider=..., timeout=...)`. Any model failure /
+  parse error / unavailability degrades to a no-op; the diagnose
+  command never breaks because the model failed.
+- `diagnose_free_flight` is the raw-evidence assembler + curator
+  prompt for the open-ended pass. It reads and redacts the
+  profile's `config.yaml` via `_redact_raw_yaml` (parent blocks
+  like `auth`/`credentials`/`secrets` are fully redacted; leaf
+  keys matching `api_key`/`token`/`password`/`secret` parts have
+  their value replaced with `***REDACTED***`), then inlines the
+  redacted YAML into the prompt. Log files and `state.db` are
+  referenced via `@folder:` / `@file:` syntax. Two finding kinds
+  are returned: `anomaly` and `config_suggestion`.
 - `refresh_catalog` is profile-agnostic by design — every Hermes profile
   reads the same provider cache. `--gateway` selects which provider's
   catalog is fetched and which provider manifest is written (currently
@@ -114,15 +147,132 @@ caches.
 
 ## Local Contracts
 
-- `moa_truncation.MOA_OUTPUT_TOKEN_ALERT` and `DEFAULT_LOOKBACK_DAYS` are
+- `diagnose.OUTPUT_TOKEN_ALERT` and `DEFAULT_LOOKBACK_DAYS` are
   the canonical thresholds. Override per-call via flags, not by mutating
   module attributes.
-- Log severity gating: Signal B only counts matches on
-  `WARNING|ERROR|CRITICAL` lines, never INFO. The
+- **Log-file discovery is `*.log` + `*.log.*` at the top level of
+  the profile's `logs/` directory**, returned by
+  `diagnose.discover_log_files(log_dir)`. The discovery contract
+  is: every active file (`agent.log`, `errors.log`, `tui_gateway_crash.log`,
+  `gateway.log`, etc.) AND every rotated copy (`agent.log.1`,
+  `agent.log.1.gz`). Non-log files (e.g. `README.md`) are excluded.
+  Curator snapshot directories (`logs/curator/<ts>/`) are excluded by
+  default and walked only when `include_curator=True` (CLI:
+  `--include-curator`). The `--days` / `--since` window is then applied
+  at the *line* level across every discovered file, so the verdict
+  reflects "the part of each logfile that is X days old" — not the
+  whole file.
+- Log severity gating: the `truncation_log_markers` detector only counts
+  matches on `WARNING|ERROR|CRITICAL` lines, never INFO. The
   `STREAM_DROP_PATTERN` count is reported separately and never triggers
   the alert.
 - Reports must include `fired: bool` so JSON consumers can branch on the
-  exit signal without parsing human output.
+  exit signal without parsing human output. The `selected_detectors`
+  list names every detector that ran; `skipped_detectors` names every
+  canonical detector excluded by `--only` / `--skip` (empty when all
+  ran). The renderer surfaces a `skipped:` header whenever the list is
+  non-empty. The `discovered_log_files`
+  list is reported alongside the scan for reproducibility; `per_file`
+  inside `truncation_log_markers` carries per-file hit counts.
+- `diagnose.run()` accepts a `free_flight: bool` parameter (default
+  True). When True, the orchestrator appends the open-ended curator
+  pass to `per_detector`. Two kinds of free-flight findings are
+  emitted: `free_flight:anomaly:<slug>` (fired iff severity is
+  warn/alert) and `free_flight:config:<slug>` (never fired; the
+  operator decides whether to apply). A `free_flight` field in the
+  report summarises findings_count / fired_count / token_budget.
+  The curator model is resolved from the profile config via
+  `resolve_curator_config(paths)` and invoked as `hermes_chat(prompt,
+  model=..., provider=..., timeout=...)`. A model failure /
+  unavailability / parse error degrades to a no-op — the diagnose
+  command stays useful offline.
+- `diagnose_free_flight` redacts secrets before passing the evidence
+  to the model. `_redact_raw_yaml` is a line-oriented scanner:
+  parent blocks in `_REDACT_PARENT_KEYS` (`auth`, `credentials`,
+  `secrets`, `providers`, `api_keys`, `tokens`) recursively
+  redact every child line until the parent's indentation returns.
+  Leaf keys whose split-parts match `_REDACT_VALUE_PARTS`
+  (`api_key`, `token`, `password`, `secret`, `credential`, etc.)
+  have their value replaced with `***REDACTED***`. Keys are split
+  on `_`/`-`/non-alphanumeric delimiters before part matching so
+  `max_tokens` (parts `["max","tokens"]`) is NOT redacted while
+  `api_key` (parts `["api","key","api_key"]`) IS. False negatives
+  are a security bug; false positives only erase legitimate
+  config (safe). The redacted config is inlined into the prompt;
+  the raw config is never handed to the model via `@file:`.
+- `diagnose_free_flight` enforces a token budget (default 100k) by
+  trimming sessions tail-first; whole sessions are dropped, never
+  partially. A budget of 0 disables the pass entirely (skipped
+  detector result).
+- `diagnose.apply_config_suggestions()` reuses the
+  :func:`talaria.sync.writer.write_with_backup` atomic backup
+  writer (the same primitive :mod:`talaria.hermos.auxiliary` and
+  :mod:`talaria.hermos.context_cache_fix` use) plus
+  :mod:`talaria.sync.yaml_io` for safe YAML round-trip. Each
+  `config_suggestion` finding is a `yaml_path = suggested_value`
+  set; bad paths are captured as `skipped: [{yaml_path, reason}]`
+  and never raise. `dry_run=True` reports a unified diff in
+  `apply.dry_run_diff` without writing bytes. The CLI surface
+  is `--apply-suggestions` to write and `--dry-run` to preview;
+  neither is on by default.
+- The canonical operator-facing detector catalog (id, what it
+  checks, threshold, severity, where it queries) is the
+  `Detector catalog` table below. The same data is also surfaced
+  via `talaria hermes diagnose --show-resolution` for machines.
+  Keep both in sync when detectors are added or thresholds change.
+
+### Detector catalog
+
+| id                          | what it checks                                                                  | threshold / window                              | severity   | source                                  |
+|-----------------------------|--------------------------------------------------------------------------------|--------------------------------------------------|------------|------------------------------------------|
+| `truncation_output`         | sessions with `output_tokens` above the alert threshold                         | 64 000 (no-rotation; = `OUTPUT_TOKEN_ALERT`)    | alert      | `sessions` table (SQL)                   |
+| `truncation_finish_reason`  | messages with `finish_reason='length'` in the window                             | ≥ 1 hit                                         | alert      | `messages` table (SQL)                   |
+| `truncation_log_markers`     | `WARNING|ERROR|CRITICAL` lines matching a length-class pattern in any `*.log` file | ≥ 1 hit                                         | alert      | log files (uses `diagnose.discover_log_files`) |
+| `stream_drops`              | mid-tool-call stream-drop warnings above the alert / borderline rate             | alert: 10 / borderline: 3 per window              | warn / alert | log files                              |
+| `compression_stale_locks`   | `compression_locks` rows whose `expires_at` is in the past                       | ≥ 1 expired lock                                 | alert      | `compression_locks` table (SQL)          |
+| `compression_failures`      | sessions with `compression_failure_error IS NOT NULL` in the window               | ≥ 1 session                                     | alert      | `sessions` table (SQL)                   |
+| `rewinds`                   | sessions with `rewind_count` above the alert threshold                            | alert: 3 (counts ≥ 2 are reported)                | warn       | `sessions` table (SQL)                   |
+| `handoff_errors`             | sessions with `handoff_error IS NOT NULL` in the window                          | ≥ 1 session                                     | alert      | `sessions` table (SQL)                   |
+| `cost_anomalies`            | sessions with `cost_status` outside the allowed set, or est/actual divergence    | alert: divergence ≥ 25 % or bad status           | warn / alert | `sessions` table (SQL)                 |
+| `zombie_sessions`            | sessions with `ended_at IS NULL` and `started_at` older than the threshold        | 24 h (`ZOMBIE_THRESHOLD_SECONDS`)                | alert      | `sessions` table (SQL)                   |
+| `ghost_sessions`             | sessions with no `messages` rows in the window                                    | ≥ 1 session                                     | warn       | `sessions` + `messages` join (SQL)       |
+
+All detectors are *confident*: they decide in pure Python with no
+model call. The free-flight curator pass is the only LLM use, and
+its findings (anomaly + config_suggestion) are emitted under the
+`free_flight:` id prefix so the renderer can group them.
+
+- `benchmark` reports use `ok: bool`. The `per_model` list carries
+  one entry per discovered `(model, provider)` pair with: `sources`
+  (every config path that pointed to it), `reasoning_level` (from
+  `sessions.model_config.reasoning_config.effort`), `capabilities`
+  (enriched from `models_dev_cache.json` by slug match — handles
+  provider-prefix differences like `zai-coding/` vs `z-ai/`),
+  `state_db` (call count, avg tokens, cost aggregates),
+  `avg_first_response_latency_s` (first user→assistant gap per
+  session, averaged), `smoke` (cached or fresh JSON smoke-call
+  result: `ok`, `latency_s`), and `vision` (a list of per-fixture
+  results for vision-capable models only; `None` for non-vision
+  models). Exit code 1 if any model fails the smoke test OR any
+  vision fixture fails; 0 otherwise. The cache lives at
+  `$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json` and is
+  keyed by `model--provider` for smoke and
+  `<model_id>::vision::<fixture_label>` for vision. Smoke calls are
+  suppressed with `--no-smoke` (state.db-only report); vision calls
+  are suppressed with `--no-vision` (default: vision enabled for
+  every model whose capabilities include vision per models.dev).
+  `--ttl` controls the cache freshness window for both (default
+  1800s = 30 min). The vision fixture images live in
+  `assets/benchmark/vision/` (resolved by
+  `_default_vision_dir()` relative to the repository root);
+  `--vision-fixtures-dir` overrides the path. Vision ground-truth
+  entries support `|`-separated alternatives for visually-ambiguous
+  fixtures (e.g. the winged-sandal glyph reads as "wings",
+  "winged", "sandal", or "butterfly" depending on the model — all
+  are valid). The report summary carries `vision_enabled`,
+  `vision_models` (count of vision-capable discovered models),
+  `vision_calls_made`, `vision_calls_cached`, `vision_dir`, and
+  `vision_dir_found`.
 - `refresh_catalog` reports use `ok: bool` instead of `fired` because
   there is no alert condition — there is only "refresh succeeded" vs.
   "tool error". Exit code 2 covers all failure modes
@@ -265,7 +415,30 @@ caches.
 - Signal functions are tested against a synthetic SQLite database created
   with `tests._helpers.make_sessions_db`.
 - Log scans are tested with hand-crafted lines in a tmpdir; severity gating
-  is the must-test edge case.
+  is the must-test edge case. The `truncation_log_markers` detector tests
+  cover: per-line window filtering inside a long file, multi-file
+  aggregation, missing-file resilience, the `STREAM_DROP_PATTERN`
+  separation, and per-file hit breakdown.
+- `discover_log_files` is tested for: empty / missing dir, picking up
+  active and rotated files, excluding non-log files, excluding
+  `logs/curator/<ts>/` by default, walking the curator tree only when
+  `include_curator=True`, and de-duplicating symlinks whose resolved
+  target is the same file.
+- `diagnose` tests cover: per-detector unit tests with
+  `make_full_state_db` fixtures (zombies, ghosts, rewinds, cost
+  divergences, stale locks, compression failures, handoff errors,
+  high-output sessions, length finish_reason), orchestrator with
+  stub `free_flight_runner`, `--only` /
+  `--skip` filtering (incl. unknown-id exit 2), missing state.db
+  resilience, renderer for both structured and free-flight groups,
+  and CLI subprocess coverage for the full flag set.
+- `diagnose_free_flight` tests cover: config redaction (parent
+  blocks recursively redacted, leaf keys by split-part matching,
+  `max_tokens` preserved, comments/blanks preserved), zero-log-lines
+  short-circuit, finding parsing (anomaly + config_suggestion
+  kinds, default kind, invalid kind fallback), fenced-JSON / bare-
+  JSON / garbage-input parsing, stub-runner finding return, and
+  unavailable-runner degradation.
 - `refresh_catalog` tests stub `urllib.request.urlopen` and run the full
   `run()` orchestrator against realistic upstream payloads. No real
   network is used.
@@ -333,8 +506,46 @@ caches.
 
 ## Child DOX Index
 
-- `moa_truncation.py` — Signal A (output_tokens trend) + Signal B (length-class
-  log markers).
+- `diagnose.py` — multi-detector profile anomaly scan. Runs 11
+  structured detectors (truncation_output, truncation_finish_reason,
+  truncation_log_markers, stream_drops, compression_stale_locks,
+  compression_failures, rewinds, handoff_errors, cost_anomalies,
+  zombie_sessions, ghost_sessions) against `state.db` and `logs/`,
+  plus a default-on free-flight curator pass. Surfaced as
+  `talaria hermes diagnose`.
+- `benchmark.py` — per-model health/cost/latency/capability report.
+  Discovers every unique `(model, provider)` pair from `config.yaml`,
+  aggregates recent sessions from `state.db` (call counts, token
+  averages, cost, reasoning level from `model_config`, first-response
+  latency from the messages table), enriches with capability data
+  from `models_dev_cache.json` (reasoning, tool-call, vision,
+  context/output limits, per-token cost matched by model slug so
+  provider-prefix differences like `zai-coding/` vs `z-ai/` resolve).
+  Makes one fresh JSON smoke call per model when the cache is stale
+  (default TTL 30 min, cached to
+  `$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`).
+  For every model whose capabilities include vision, sends each
+  fixture image from `assets/benchmark/vision/` via
+  `hermes chat --image` and asserts the model reads it correctly
+  (counting, OCR, spatial reasoning, brand-logo recognition).
+  `--no-vision` disables vision calls; `--vision-fixtures-dir`
+  overrides the fixture path. Surfaced as
+  `talaria hermes benchmark`. Read-only.
+- `diagnose_llm.py` — curator-model subprocess runner. Resolves
+  the curator model + provider from the profile config at runtime
+  via `resolve_curator_config(paths)`, then calls
+  `hermes chat -q` via `hermes_chat(prompt, model=..., provider=...,
+  timeout=...)`. Degrades to `AdjudicationUnavailable` on any
+  failure; the orchestrator catches this and emits a no-op result.
+- `diagnose_free_flight.py` — open-ended curator pass for the
+  `diagnose` command. Reads + redacts the profile's `config.yaml`
+  via `_redact_raw_yaml`, inlines it into the prompt, references
+  log files + `state.db` via `@folder:` / `@file:` syntax. Resolves
+  the curator model + provider from config at runtime (no
+  hardcoding). Parses the curator response into findings of two
+  kinds (`anomaly` + `config_suggestion`) and returns them as
+  `DetectorResult` objects. Config suggestions never fire
+  (`fired=False`); the operator decides whether to act.
 - `refresh_catalog.py` — fetch + reshape the selected gateway catalog into
   the matching Hermes provider manifest cache. Profile-agnostic.
 - `context_cache_fix.py` — repair curated known-bad entries in a profile's

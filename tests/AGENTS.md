@@ -7,12 +7,16 @@ Pytest suite for the Talaria CLI and library.
 ## Ownership
 
 - One test module per feature: `test_paths.py` for path resolution,
-  `test_moa_truncation.py`, `test_refresh_catalog.py`,
-  `test_context_cache_fix.py`, `test_auxiliary.py`, and `test_sync.py`
-  for feature coverage. `test_skill_install.py` covers recursive skill
-  install orchestration.
+  `test_refresh_catalog.py`,
+  `test_context_cache_fix.py`, `test_auxiliary.py`, `test_sync.py`,
+  and `test_diagnose.py` for feature coverage. `test_skill_install.py`
+  covers recursive skill install orchestration.
+  `test_diagnose_aux_models.py` is a live-model benchmark suite
+  gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1`.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
-  `_helpers.py` (importable, not auto-discovered by pytest).
+  `_helpers.py` (importable, not auto-discovered by pytest). Vision
+  fixture images live in `assets/benchmark/vision/` (see
+  `assets/AGENTS.md`).
 
 ## Local Contracts
 
@@ -22,6 +26,17 @@ Pytest suite for the Talaria CLI and library.
   — invoking the entry point proves the installed CLI surface works, not
   just the library functions.
 - `tests/__init__.py` exists so Pyright/pytest can import from `tests._helpers`.
+- **Internal test env vars use the `_TESTING_TALARIA_*` prefix.** Any
+  environment variable that controls pytest behaviour (opt-in/opt-out
+  gates, config overrides for CI, fixture toggles) MUST be named
+  `_TESTING_TALARIA_<NAME>`. The leading underscore signals "internal,
+  not for production use" and keeps test-only vars out of the README's
+  production env-var table. Production env vars (`HERMES_PROFILE`,
+  `XDG_CACHE_HOME`, `GITHUB_TOKEN`) never use this prefix — they are
+  documented in `README.md` §Environment and consumed by the runtime,
+  not by the test suite. Current `_TESTING_TALARIA_*` vars:
+  `_TESTING_TALARIA_RUN_MODEL_BENCH`, `_TESTING_TALARIA_SKIP_MODEL_BENCH`,
+  `_TESTING_TALARIA_PROFILE_CONFIG`.
 - **Silent-by-default.** CLI tests that assert on human-readable stdout
   content must pass `-v/--verbose` explicitly; the default run is exit
   code only. Tests that assert on JSON output, help text, completion
@@ -34,14 +49,18 @@ Pytest suite for the Talaria CLI and library.
     JSON channel.
   * `talaria hermes log-rotate` — human-readable default for both
     no-action and action runs.
+  * `talaria hermes diagnose` — human-readable default; pass
+    `-q/--quiet` to assert on the silent (exit-code-only) path.
+  * `talaria hermes benchmark` — human-readable default; pass
+    `-q/--quiet` to assert on the silent (exit-code-only) path.
   * `talaria completion` and `talaria config sync --list` — the
     output is the answer the test asked for.
 
 ## Work Guidance
 
 - New feature: drop a `tests/test_<feature>.py` alongside the existing
-  Signal/Run/Renderer/Cli test classes (see `test_moa_truncation.py` for
-  the canonical layout).
+  Signal/Run/Renderer/Cli test classes (see `test_refresh_catalog.py`
+  for a canonical example).
 - Tests assert on real exit codes (`0` / `1`), not just stdout content.
 - Use the `fake_hermes_root` fixture for layout, `make_sessions_db` for
   SQLite fixtures, and `_log_line(level, body, when)`-style helpers for
@@ -56,7 +75,6 @@ Pytest suite for the Talaria CLI and library.
 
 - `test_paths.py` — `talaria.paths` resolution precedence and the
   `talaria paths` CLI dispatch (default-prints contract).
-- `test_moa_truncation.py` — Signal A, Signal B, renderer, JSON output, CLI.
 - `test_refresh_catalog.py` — reshape, credential discovery, cache
   freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.
 - `test_context_cache_fix.py` — curated context-length cache repairs,
@@ -83,5 +101,47 @@ Pytest suite for the Talaria CLI and library.
   protects nothing), dry-run suppression, multi-profile target
   enumeration, run/render shape, `show_resolution` option echo,
   and CLI `--help`.
-- `_helpers.py` — `make_sessions_db(path, rows)`.
+- `test_diagnose.py` — 11-detector diagnose feature: per-detector
+  tests (truncation_output, compression_stale_locks, zombie,
+  ghost, rewind, cost_anomalies, etc.), orchestrator selection
+  (`--only`/`--skip`), error isolation, renderer, apply-config-
+  suggestions (dry-run, backup, parent-block creation, type
+  coercion, missing-file creation), config redaction, free-flight
+  pass (zero-log-lines short-circuit, finding parsing, stub runner,
+  unavailable degradation), and CLI subprocess coverage.
+- `test_benchmark.py` — `talaria hermes benchmark` feature: model
+  discovery (dedup, sources, alias provider resolution), state.db
+  aggregation (group-by-model, window filtering, reasoning config
+  extraction, first-response latency CTE), models.dev slug matching
+  (nested prefixes, vision detection), cache TTL freshness, smoke
+  stub runner (ok/fail/exception), orchestrator run paths
+  (no-smoke, cached reuse, stale-trigger), renderer (clean/fail/
+  no-models), and CLI subprocess (--help, --show-resolution,
+  --json, --quiet, default-prints). Also covers the integrated
+  vision benchmark: `_match_vision_response` (basic +
+  case-insensitive + `|` alternatives), `_vision_call` stub runner,
+  `run()` vision loop (vision model tested / non-vision skipped,
+  `vision=False` opt-out, failure recording, TTL caching, missing
+  fixture dir degradation), renderer vision lines, and CLI
+  `--no-vision` / `--vision-fixtures-dir` flags.
+- `test_diagnose_aux_models.py` — live-model benchmark suite with
+  **deduplicated discovery**. Walks `model.default`, every
+  `model.aliases` entry, and every `auxiliary.<usecase>.model` block
+  to build a set of unique `(model, provider)` pairs (50 config
+  references → 19 unique pairs in the live vc-client profile). Each
+  pair is benchmarked once via `hermes chat -q` with a JSON smoke
+  prompt. Gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` (opt-in)
+  with `_TESTING_TALARIA_SKIP_MODEL_BENCH=1` (opt-out, wins over
+  opt-in). Also includes curator parity invariant
+  (`xfail(strict=False)`), a live vision smoke test
+  (`test_benchmark_vision_live`) that runs the integrated
+  `talaria.hermos.benchmark.run` with `vision=True` against the
+  live profile, and deterministic config-invariant checks (YAML
+  parse, required aliases, non-empty model ids, model.default set,
+  discovery finds ≥1 target) that always run. Vision capability is
+  no longer tested as a standalone parametrized test — it is part
+  of the `talaria hermes benchmark` feature (see `test_benchmark.py`
+  for unit coverage).
+- `_helpers.py` — `make_sessions_db(path, rows)`,
+  `make_full_state_db(path, *, sessions, messages, compression_locks)`.
 - `conftest.py` — `fake_hermes_root`, `clean_env` fixtures.

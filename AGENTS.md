@@ -95,3 +95,4 @@ Project-wide durable preferences (style, workflow, conventions) live in user mem
 - `src/talaria/` — Python package: CLI entry point, path resolution, Hermes features.
 - `tests/` — pytest suite with shared fixtures and helpers.
 - `assets/` — logo SVG sources + rendered PNG sizes.
+- `docs/` — implementation specifications for future Hermes Agent sessions. Each `*.md` file is a self-contained brief: problem + goal + design + verification + rollback. Files here describe **future work**, never the current state of `src/`.

@@ -36,7 +36,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   * `talaria config sync --list` — its output *is* the dot-path list
     the operator asked for.
 - All filesystem and SQLite access is **read-only against the Hermes runtime**
-  for inspection features (`hermes moa-truncation`, `paths`).
+  for inspection features (`hermes diagnose`, `paths`).
   Write-bearing carve-outs are explicit: `talaria config sync` copies profile
   artefacts between profiles, `talaria config apply-auxiliary` derives
   `model.aliases` from a profile's `auxiliary` block,
