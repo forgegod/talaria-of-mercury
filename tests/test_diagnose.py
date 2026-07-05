@@ -1,0 +1,1206 @@
+"""Tests for talaria.hermos.diagnose, diagnose_llm, and diagnose_free_flight.
+
+The canonical fixture lives in :mod:`tests._helpers.make_full_state_db`,
+which mirrors the production Hermes sessions / messages / compression_locks
+schema. Each test class builds a focused scenario; the orchestrator
+tests pass a stub ``free_flight_runner`` to avoid any subprocess calls.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from talaria.hermos import diagnose, diagnose_free_flight, diagnose_llm
+from talaria.hermos.diagnose import DetectorResult
+from talaria.paths import ResolvedPaths
+from tests._helpers import make_full_state_db
+
+
+def _paths(tmp_path: Path, *, state_db: Path, log_dir: Path) -> ResolvedPaths:
+    return ResolvedPaths(
+        profile="test",
+        hermes_root=tmp_path,
+        state_db=state_db,
+        log_dir=log_dir,
+    )
+
+
+def _now() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _log_line(level: str, body: str, when: datetime) -> str:
+    ts = when.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    return f"{ts} {level} agent.chat_completion_helpers: {body}\n"
+
+
+# ---------------- Per-detector tests ----------------
+
+class TestTruncationOutput:
+    def test_no_sessions_is_info(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_truncation_output(
+                con, (_now() - 86400), diagnose.OUTPUT_TOKEN_ALERT,
+            )
+        finally:
+            con.close()
+        assert r.id == diagnose.TRUNCATION_OUTPUT
+        assert r.severity == diagnose.SEVERITY_INFO
+        assert r.fired is False
+
+    def test_high_output_session_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "s1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now, "output_tokens": 200_000, "message_count": 100,
+             "api_call_count": 100, "rewind_count": 0, "archived": 0,
+             "estimated_cost_usd": 1.0, "actual_cost_usd": 1.0,
+             "cost_status": "ok", "end_reason": "cli_close", "ended_at": now + 60},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_truncation_output(
+                con, now - 86400, diagnose.OUTPUT_TOKEN_ALERT,
+            )
+        finally:
+            con.close()
+        assert r.severity == diagnose.SEVERITY_ALERT
+        assert r.fired is True
+        assert any(s["id"] == "s1" for s in r.evidence["flagged"])
+
+    def test_borderline_band_marks_borderline(self, tmp_path: Path) -> None:
+        """Sessions at 0.75x–1.0x of the threshold are borderline but not flagged."""
+        db = tmp_path / "state.db"
+        now = _now()
+        threshold = diagnose.OUTPUT_TOKEN_ALERT
+        make_full_state_db(db, sessions=[
+            {"id": "borderline", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now, "output_tokens": int(threshold * 0.8),
+             "rewind_count": 0, "archived": 0, "message_count": 1, "api_call_count": 1},
+            {"id": "below_band", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now, "output_tokens": int(threshold * 0.5),
+             "rewind_count": 0, "archived": 0, "message_count": 1, "api_call_count": 1},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_truncation_output(con, now - 86400, threshold)
+        finally:
+            con.close()
+        # Both sessions present; only the borderline one is in the
+        # borderline_band, but no session is flagged, so fired is False.
+        # Because fired is False, the borderline flag must also be False
+        # (the orchestrator only escalates borderline if fired=True).
+        assert r.fired is False
+        assert r.borderline is False
+        assert any(s["id"] == "borderline" for s in r.evidence["borderline_band"])
+
+
+class TestCompressionStaleLocks:
+    def test_no_locks_is_info(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_compression_stale_locks(con, _now())
+        finally:
+            con.close()
+        assert r.severity == diagnose.SEVERITY_INFO
+        assert r.evidence["locks"] == []
+
+    def test_expired_lock_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(
+            db,
+            compression_locks=[
+                {"session_id": "s1", "holder": "compressor", "acquired_at": now - 7200,
+                 "expires_at": now - 3600},  # expired 1h ago
+            ],
+        )
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_compression_stale_locks(con, now)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.severity == diagnose.SEVERITY_ALERT
+        assert r.evidence["locks"][0]["session_id"] == "s1"
+
+
+class TestCompressionFailures:
+    def test_failure_session_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "fail1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "compression_failure_error": "lock timeout",
+             "rewind_count": 0, "archived": 0, "message_count": 0, "api_call_count": 0,
+             "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_compression_failures(con, now - 86400)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.evidence["sessions"][0]["compression_failure_error"] == "lock timeout"
+
+
+class TestZombieSessions:
+    def test_zombie_with_ended_at_null_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        # 25 hours ago: older than the 24h zombie threshold.
+        make_full_state_db(db, sessions=[
+            {"id": "zombie", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 25 * 3600, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 1, "api_call_count": 0,
+             "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_zombie_sessions(con, now)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.evidence["sessions"][0]["id"] == "zombie"
+
+    def test_recent_ended_at_null_not_a_zombie(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "young", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 60, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 0, "api_call_count": 0,
+             "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_zombie_sessions(con, now)
+        finally:
+            con.close()
+        assert r.fired is False
+
+
+class TestGhostSessions:
+    def test_session_with_no_messages_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[
+                {"id": "ghost", "source": "cli", "model": "minimax/minimax-m3",
+                 "started_at": now - 100, "message_count": 0,
+                 "rewind_count": 0, "archived": 0, "api_call_count": 0,
+                 "output_tokens": 0},
+            ],
+        )
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_ghost_sessions(con, now - 86400)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.evidence["sessions"][0]["id"] == "ghost"
+
+
+class TestRewinds:
+    def test_high_rewind_count_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "rw1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "rewind_count": 5,
+             "message_count": 0, "api_call_count": 0, "output_tokens": 0,
+             "archived": 0},
+            {"id": "rw2", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "rewind_count": 2,  # borderline
+             "message_count": 0, "api_call_count": 0, "output_tokens": 0,
+             "archived": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_rewinds(con, now - 86400)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.borderline is True  # at least one session in the 2–3 band
+
+
+class TestCostAnomalies:
+    def test_divergence_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "cost1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "estimated_cost_usd": 1.0,
+             "actual_cost_usd": 0.5, "cost_status": "ok",
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_cost_anomalies(con, now - 86400)
+        finally:
+            con.close()
+        assert r.fired is True
+        assert r.evidence["alert_sessions"][0]["id"] == "cost1"
+
+    def test_borderline_only(self, tmp_path: Path) -> None:
+        """Divergence in the 5–25% band → warn, fired=False, borderline=True."""
+        db = tmp_path / "state.db"
+        now = _now()
+        # 10% divergence — between borderline and alert.
+        make_full_state_db(db, sessions=[
+            {"id": "c1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "estimated_cost_usd": 1.0,
+             "actual_cost_usd": 0.9, "cost_status": "ok",
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_cost_anomalies(con, now - 86400)
+        finally:
+            con.close()
+        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.fired is False  # 10% is not >= 25%
+        assert r.borderline is True
+
+    def test_bad_cost_status_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "cs", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 100, "estimated_cost_usd": 1.0,
+             "actual_cost_usd": 1.0, "cost_status": "denied",
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = diagnose.detector_cost_anomalies(con, now - 86400)
+        finally:
+            con.close()
+        assert r.fired is True
+
+
+# ---------------- Orchestrator tests ----------------
+
+class TestOrchestrator:
+    def test_run_with_clean_state_returns_no_fire(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(paths, days=2, free_flight=False)
+        assert report["fired"] is False
+        assert len(report["per_detector"]) == len(diagnose.DETECTOR_IDS)
+
+    def test_run_with_zombie_fires(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "z", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 25 * 3600, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(paths, days=2, free_flight=False)
+        assert report["fired"] is True
+        by_id = {d["id"]: d for d in report["per_detector"]}
+        assert by_id["zombie_sessions"]["fired"] is True
+
+    def test_run_only_runs_selected_detectors(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(
+            paths, days=2,
+            only=(diagnose.ZOMBIE_SESSIONS,),
+            free_flight=False,
+        )
+        assert report["selected_detectors"] == [diagnose.ZOMBIE_SESSIONS]
+        assert len(report["per_detector"]) == 1
+
+    def test_run_skip_excludes_detectors(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(
+            paths, days=2,
+            skip=(diagnose.ZOMBIE_SESSIONS, diagnose.GHOST_SESSIONS),
+        )
+        assert diagnose.ZOMBIE_SESSIONS not in report["selected_detectors"]
+        assert diagnose.GHOST_SESSIONS not in report["selected_detectors"]
+        assert diagnose.ZOMBIE_SESSIONS in report["skipped_detectors"]
+        assert diagnose.GHOST_SESSIONS in report["skipped_detectors"]
+
+    def test_run_unknown_only_raises(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        with pytest.raises(ValueError, match="unknown detector"):
+            diagnose.run(paths, days=2, only=("nonsense",))
+
+    def test_run_one_detector_error_does_not_break_others(self, tmp_path: Path) -> None:
+        """A single detector crashing must not prevent the others from running."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        # A minimal config.yaml so the free-flight pass has data to
+        # assemble and actually reaches the runner call. Without it
+        # the pass returns free_flight:no_data before invoking the runner.
+        config = tmp_path / "profiles" / "test" / "config.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("model:\n  default: gpt-5\n")
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+
+        def boom_runner(prompt, *, timeout, **kw):
+            raise RuntimeError("free-flight runner unavailable")
+
+        # With a clean state, no deterministic detector fires. The
+        # free-flight pass is the only place the runner is called; a
+        # runner exception must degrade to a free_flight:error
+        # result, not crash the diagnose command.
+        report = diagnose.run(
+            paths, days=2,
+            free_flight_runner=boom_runner,
+        )
+        assert report["fired"] is False
+        assert report["detector_errors"] == {}
+        # The free-flight block surfaces the error in the per_detector
+        # list as a free_flight:error result (severity=info, fired=False).
+        ff_errors = [d for d in report["per_detector"] if d["id"] == "free_flight:error"]
+        assert len(ff_errors) == 1
+        assert "free-flight runner unavailable" in ff_errors[0]["summary"]
+
+    def test_missing_state_db_does_not_crash(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(
+            tmp_path, state_db=tmp_path / "nope.db", log_dir=log_dir,
+        )
+        report = diagnose.run(paths, days=2, free_flight=False)
+        # The state.db-backed detectors surface an "info" result
+        # noting the missing DB; the log-backed detectors run normally.
+        by_id = {d["id"]: d for d in report["per_detector"]}
+        assert by_id[diagnose.TRUNCATION_OUTPUT]["severity"] == diagnose.SEVERITY_INFO
+
+
+# ---------------- Renderer tests ----------------
+
+class TestRenderer:
+    def test_human_clean(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(paths, days=2, free_flight=False)
+        code, text = diagnose.render_human(report)
+        assert code == 0
+        assert "VERDICT: clean" in text
+        assert "Signal A" not in text  # no legacy phrasing
+        for det in diagnose.DETECTOR_IDS:
+            assert det in text
+
+    def test_human_fired(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "zombie", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 25 * 3600, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = diagnose.run(paths, days=2, free_flight=False)
+        code, text = diagnose.render_human(report)
+        assert code == 1
+        assert "VERDICT" in text
+        assert "fired" in text.lower()
+        assert "zombie_sessions" in text
+
+
+# ---------------- Apply config_suggestion tests ----------------
+class TestApplySuggestions:
+    """Tests for diagnose.apply_config_suggestions() — the self-heal path."""
+
+    def _paths(self, tmp_path, *, config_path):
+        return ResolvedPaths(
+            profile="test", hermes_root=tmp_path,
+            state_db=tmp_path / "s.db", log_dir=tmp_path / "l",
+        )
+
+    def _suggestion(
+        self, *, slug, yaml_path, suggested,
+        current="unknown", severity="info",
+    ):
+        return DetectorResult(
+            id=f"free_flight:config:{slug}",
+            severity=severity,
+            summary=f"suggestion {slug}",
+            evidence={
+                "kind": "config_suggestion",
+                "yaml_path": yaml_path,
+                "current_value": current,
+                "suggested_value": suggested,
+                "rationale": "test",
+            },
+        )
+
+    def test_dry_run_does_not_write(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            "model:\n"
+            "  default: gpt-5\n"
+            "moa:\n"
+            "  presets:\n"
+            "    coding:\n"
+            "      max_tokens: 32768\n"
+        )
+        original = cfg.read_text()
+        paths = self._paths(tmp_path, config_path=cfg)
+        sug = self._suggestion(
+            slug="lower", yaml_path="moa.presets.coding.max_tokens",
+            suggested="16384", current="32768",
+        )
+        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=True, config_path=cfg)
+        assert rep["ok"] is True
+        assert rep["dry_run"] is True
+        assert len(rep["applied"]) == 1
+        assert cfg.read_text() == original  # unchanged
+        assert "max_tokens: 16384" in rep["dry_run_diff"]
+        assert "max_tokens: 32768" in rep["dry_run_diff"]
+
+    def test_apply_writes_backup_and_new_file(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            "model:\n"
+            "  default: gpt-5\n"
+            "moa:\n"
+            "  presets:\n"
+            "    coding:\n"
+            "      max_tokens: 32768\n"
+        )
+        paths = self._paths(tmp_path, config_path=cfg)
+        sug = self._suggestion(
+            slug="lower", yaml_path="moa.presets.coding.max_tokens",
+            suggested="16384", current="32768",
+        )
+        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        assert rep["backup"] is not None
+        bak = Path(rep["backup"])
+        assert bak.exists()
+        assert "max_tokens: 32768" in bak.read_text()  # backup is the original
+        new = cfg.read_text()
+        assert "max_tokens: 16384" in new
+        assert "max_tokens: 32768" not in new
+
+    def test_apply_creates_missing_parent_block(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            "model:\n"
+            "  default: gpt-5\n"
+        )
+        paths = self._paths(tmp_path, config_path=cfg)
+        sug = self._suggestion(
+            slug="add", yaml_path="moa.presets.coding.max_tokens",
+            suggested="16384", current="unknown",
+        )
+        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        new = cfg.read_text()
+        assert "moa:" in new
+        assert "presets:" in new
+        assert "coding:" in new
+        assert "max_tokens: 16384" in new
+
+    def test_apply_coerces_value_types(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            "a: 1\n"
+            "b: 1.0\n"
+            "c: true\n"
+            "d: hello\n"
+        )
+        paths = self._paths(tmp_path, config_path=cfg)
+        sugs = [
+            self._suggestion(slug="ai", yaml_path="a", suggested="42"),
+            self._suggestion(slug="af", yaml_path="b", suggested="3.14"),
+            self._suggestion(slug="ab", yaml_path="c", suggested="false"),
+            self._suggestion(slug="as", yaml_path="d", suggested="world"),
+        ]
+        rep = diagnose.apply_config_suggestions(paths, sugs, dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        new = cfg.read_text()
+        assert "a: 42\n" in new
+        assert "b: 3.14\n" in new
+        assert "c: false\n" in new
+        assert "d: world\n" in new
+
+    def test_empty_yaml_path_is_skipped(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("a: 1\n")
+        paths = self._paths(tmp_path, config_path=cfg)
+        sug = self._suggestion(
+            slug="empty", yaml_path="", suggested="x", current="1",
+        )
+        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        assert rep["applied"] == []
+        assert any(s.get("reason") == "empty yaml_path" for s in rep["skipped"])
+        assert cfg.read_text() == "a: 1\n"
+
+    def test_apply_no_suggestions_is_noop(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("a: 1\n")
+        paths = self._paths(tmp_path, config_path=cfg)
+        rep = diagnose.apply_config_suggestions(paths, [], dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        assert rep["applied"] == []
+        assert rep["backup"] is None
+        assert cfg.read_text() == "a: 1\n"
+
+    def test_apply_missing_config_creates_file(self, tmp_path):
+        cfg = tmp_path / "config.yaml"  # not written
+        paths = self._paths(tmp_path, config_path=cfg)
+        sug = self._suggestion(
+            slug="add", yaml_path="moa.presets.coding.max_tokens",
+            suggested="16384",
+        )
+        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        assert rep["ok"] is True
+        assert cfg.exists()
+        assert "max_tokens: 16384" in cfg.read_text()
+
+
+# ---------------- Redaction tests ----------------
+
+class TestRedaction:
+    def test_secret_parent_redacts_children(self) -> None:
+        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        raw = "auth:\n  token: bearer-abc\n  type: oauth\n"
+        out = _redact_raw_yaml(raw)
+        assert "auth: ***REDACTED***" in out
+        assert "token: ***REDACTED***" in out
+        assert "type: ***REDACTED***" in out
+        assert "bearer-abc" not in out
+
+    def test_preserves_legitimate_keys(self) -> None:
+        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        raw = "model:\n  default: gpt-5\nmoa:\n  presets:\n    coding:\n      max_tokens: 32768\n"
+        out = _redact_raw_yaml(raw)
+        assert "max_tokens: 32768" in out
+        assert "default: gpt-5" in out
+
+    def test_api_key_redaction(self) -> None:
+        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        out = _redact_raw_yaml("api_key: sk-secret\nmodel: gpt\n")
+        assert "api_key: ***REDACTED***" in out
+        assert "sk-secret" not in out
+        assert "model: gpt" in out
+
+    def test_top_level_secret_key_redaction(self) -> None:
+        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        out = _redact_raw_yaml("token: abc\nmodel: gpt\n")
+        assert "token: ***REDACTED***" in out
+        assert "abc" not in out
+
+    def test_comments_and_blanks_preserved(self) -> None:
+        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        raw = "# header comment\n\napi_key: sk-x\n# footer\n"
+        out = _redact_raw_yaml(raw)
+        assert "# header comment" in out
+        assert "# footer" in out
+        assert "sk-x" not in out
+
+
+# ---------------- Free-flight tests ----------------
+
+class TestFreeFlight:
+    def test_zero_budget_returns_skipped(self, tmp_path: Path) -> None:
+        paths = _paths(
+            tmp_path, state_db=tmp_path / "s.db", log_dir=tmp_path / "logs",
+        )
+        results = diagnose_free_flight.run(paths, days=2, log_lines=0)
+        assert len(results) == 1
+        assert results[0].id == "free_flight:skipped"
+        assert results[0].fired is False
+
+    def test_anomaly_finding_kind_parsed(self) -> None:
+        r = diagnose_free_flight._finding_to_result(
+            0, {
+                "kind": "anomaly",
+                "id": "loud_session",
+                "severity": "alert",
+                "title": "Loud session",
+                "summary": "Session s1 produced 800k output tokens",
+                "evidence_quote": "session s1 output=800000",
+            },
+        )
+        assert r.id == "free_flight:anomaly:loud_session"
+        assert r.severity == "alert"
+        assert r.fired is True
+        assert r.evidence["kind"] == "anomaly"
+        assert r.evidence["evidence_quote"] == "session s1 output=800000"
+
+    def test_config_suggestion_kind_parsed(self) -> None:
+        r = diagnose_free_flight._finding_to_result(
+            0, {
+                "kind": "config_suggestion",
+                "id": "lower_max_tokens",
+                "severity": "warn",
+                "title": "Lower max_tokens for coding preset",
+                "summary": "Several sessions hit the 32k cap",
+                "yaml_path": "moa.presets.coding.max_tokens",
+                "current_value": "32768",
+                "suggested_value": "16384",
+                "rationale": "Most sessions use < 16k; lower reduces cost",
+            },
+        )
+        assert r.id == "free_flight:config:lower_max_tokens"
+        # Config suggestions never fire; the operator decides.
+        assert r.fired is False
+        assert r.evidence["kind"] == "config_suggestion"
+        assert r.evidence["yaml_path"] == "moa.presets.coding.max_tokens"
+        assert "16384" in r.summary
+        assert "32768" in r.summary
+
+    def test_default_kind_is_anomaly(self) -> None:
+        """A finding without a 'kind' field defaults to anomaly."""
+        r = diagnose_free_flight._finding_to_result(
+            0, {"id": "x", "severity": "info", "summary": "s"},
+        )
+        assert r.id == "free_flight:anomaly:x"
+        assert r.evidence["kind"] == "anomaly"
+
+    def test_invalid_kind_falls_back_to_anomaly(self) -> None:
+        r = diagnose_free_flight._finding_to_result(
+            0, {"kind": "unicorn", "id": "x", "severity": "info", "summary": "s"},
+        )
+        assert r.id == "free_flight:anomaly:x"
+
+    def test_parse_findings_handles_fenced_json(self) -> None:
+        stdout = 'Here is my response: ```json\n{"findings":[{"id":"a","severity":"warn","summary":"b"}]}\n```'
+        findings = diagnose_free_flight._parse_findings(stdout)
+        assert len(findings) == 1
+        assert findings[0]["id"] == "a"
+
+    def test_parse_findings_empty_for_garbage(self) -> None:
+        assert diagnose_free_flight._parse_findings("not json at all") == []
+        assert diagnose_free_flight._parse_findings("") == []
+
+    def test_run_with_stub_runner_returns_findings(self, tmp_path: Path) -> None:
+        """Free-flight with a stub runner returns the model's findings."""
+        # Build a real state.db so evidence assembly succeeds.
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "s1", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 60, "output_tokens": 1000,
+             "rewind_count": 0, "archived": 0, "message_count": 1, "api_call_count": 1,
+             "cost_status": "ok", "estimated_cost_usd": 0.01, "actual_cost_usd": 0.01,
+             "end_reason": "cli_close", "ended_at": now},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        # A config.yaml is required so the free-flight pass has data
+        # to assemble (it returns no_data when both logs and config
+        # are absent).
+        config = tmp_path / "profiles" / "test" / "config.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("model:\n  default: gpt-5\n")
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+
+        def stub(prompt, *, timeout, **kw):
+            return (
+                0,
+                '{"findings":[{"kind":"anomaly","id":"loud","severity":"info","summary":"x","evidence_quote":"q"}]}',
+                "",
+            )
+
+        results = diagnose_free_flight.run(
+            paths, days=2,
+            log_lines=200,
+            subprocess_runner=stub,
+        )
+        assert len(results) == 1
+        assert results[0].id == "free_flight:anomaly:loud"
+        assert results[0].fired is False  # info severity
+
+    def test_run_unavailable_runner_degrades(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        config = tmp_path / "profiles" / "test" / "config.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("model:\n  default: gpt-5\n")
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+
+        def stub(prompt, *, timeout, **kw):
+            raise diagnose_llm.AdjudicationUnavailable("offline")
+
+        results = diagnose_free_flight.run(
+            paths, days=2,
+            log_lines=200,
+            subprocess_runner=stub,
+        )
+        assert len(results) == 1
+        assert results[0].id == "free_flight:unavailable"
+        assert "offline" in results[0].summary
+
+
+class TestOrchestratorFreeFlight:
+    def _setup(self, tmp_path: Path) -> ResolvedPaths:
+        """Shared setup: state.db + log_dir + minimal config.yaml."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        config = tmp_path / "profiles" / "test" / "config.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("model:\n  default: gpt-5\n")
+        return _paths(tmp_path, state_db=db, log_dir=log_dir)
+
+    def test_free_flight_default_on(self, tmp_path: Path) -> None:
+        """Free-flight is default-on; the report has a free_flight block.
+
+        The default behavior is to call the curator model. For this
+        test we pass a stub runner that returns zero findings, so the
+        report is hermes-free and we can assert the block shape
+        without a live model call.
+        """
+        paths = self._setup(tmp_path)
+
+        def stub(prompt, *, timeout, **kw):
+            return (0, '{"findings": []}', "")
+
+        # default free_flight=True; pass stub so no hermes chat is called
+        report = diagnose.run(
+            paths, days=2,
+            free_flight=True,
+            free_flight_runner=stub,
+        )
+        assert report["free_flight"] is not None
+        assert report["free_flight"]["findings_count"] == 0
+
+    def test_free_flight_fires_propagate(self, tmp_path: Path) -> None:
+        paths = self._setup(tmp_path)
+
+        def stub(prompt, *, timeout, **kw):
+            return (
+                0,
+                '{"findings":[{"kind":"anomaly","id":"rude","severity":"alert","summary":"rude session","evidence_quote":"q"}]}',
+                "",
+            )
+
+        report = diagnose.run(
+            paths, days=2,
+            free_flight=True, free_flight_log_lines=200,
+            free_flight_runner=stub,
+        )
+        assert report["free_flight"] is not None
+        assert report["free_flight"]["findings_count"] >= 1
+        # The alert anomaly propagates to report.fired.
+        assert report["fired"] is True
+        ff_ids = [d["id"] for d in report["per_detector"]]
+        assert any(i.startswith("free_flight:") for i in ff_ids)
+
+
+# ---------------- CLI tests ----------------
+
+class TestCli:
+    def test_help_exits_zero(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose", "--help"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "--no-free-flight" in result.stdout
+        assert "--apply-suggestions" in result.stdout
+        assert "--dry-run" in result.stdout
+        assert "--only" in result.stdout
+        assert "--skip" in result.stdout
+
+    def test_version_flag(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "--version"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "talaria" in result.stdout.lower()
+
+    def test_clean_run_exits_zero(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "--json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        payload = json.loads(result.stdout)
+        assert payload["fired"] is False
+        assert len(payload["per_detector"]) == len(diagnose.DETECTOR_IDS)
+
+    def test_fired_run_exits_1(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "zombie", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 25 * 3600, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "--json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        payload = json.loads(result.stdout)
+        assert payload["fired"] is True
+
+    def test_only_filter(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "--only", "zombie_sessions", "--json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        payload = json.loads(result.stdout)
+        assert payload["selected_detectors"] == ["zombie_sessions"]
+        assert len(payload["per_detector"]) == 1
+
+    def test_unknown_only_exits_2(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "--only", "nonsense", "--json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 2
+        assert "unknown detector" in result.stderr
+
+    def test_quiet_suppresses_human_report(self, tmp_path: Path) -> None:
+        """With -q/--quiet, the human report is suppressed (exit code only)."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "zombie", "source": "cli", "model": "minimax/minimax-m3",
+             "started_at": now - 25 * 3600, "ended_at": None,
+             "rewind_count": 0, "archived": 0, "message_count": 0,
+             "api_call_count": 0, "output_tokens": 0},
+        ])
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "--quiet"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        # No JSON, --quiet: stdout is empty.
+        assert result.stdout == ""
+
+    def test_default_run_prints_human_report(self, tmp_path: Path) -> None:
+        """The default run prints the human-readable report (verbose-by-default)."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "Profile diagnose" in result.stdout
+        assert "VERDICT: clean" in result.stdout
+
+    def test_verbose_prints_human_report(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight", "-v"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "Profile diagnose" in result.stdout
+        assert "VERDICT: clean" in result.stdout
+
+    def test_skipped_header_in_report(self, tmp_path: Path) -> None:
+        """--skip surfaces a 'skipped:' header listing excluded detectors."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(db), "--log-dir", str(log_dir),
+             "--no-free-flight",
+             "--skip", f"{diagnose.ZOMBIE_SESSIONS},{diagnose.GHOST_SESSIONS}",
+             "-v"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "skipped:" in result.stdout
+        assert diagnose.ZOMBIE_SESSIONS in result.stdout
+        assert diagnose.GHOST_SESSIONS in result.stdout
+
+    def test_show_resolution(self, tmp_path: Path) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+             "--state-db", str(tmp_path / "nope.db"),
+             "--log-dir", str(tmp_path / "nope"),
+             "--show-resolution"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "detector_ids" in result.stdout
+
+
+# ---------------- Log discovery + scan tests ----------------
+
+class TestDiscoverLogFiles:
+    def test_empty_dir(self, tmp_path: Path) -> None:
+        assert diagnose.discover_log_files(tmp_path) == []
+
+    def test_missing_dir(self, tmp_path: Path) -> None:
+        assert diagnose.discover_log_files(tmp_path / "no-such") == []
+
+    def test_picks_up_active_and_rotated(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "agent.log").write_text("")
+        (log_dir / "agent.log.1").write_text("")
+        (log_dir / "agent.log.1.gz").write_text("")
+        (log_dir / "errors.log").write_text("")
+        (log_dir / "tui_gateway_crash.log").write_text("")
+        (log_dir / "README.md").write_text("")  # non-log, must be ignored
+        names = [p.name for p in diagnose.discover_log_files(log_dir)]
+        assert names == [
+            "agent.log", "agent.log.1", "agent.log.1.gz",
+            "errors.log", "tui_gateway_crash.log",
+        ]
+
+    def test_excludes_curator_by_default(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "agent.log").write_text("")
+        curator = log_dir / "curator" / "20260704_205000"
+        curator.mkdir(parents=True)
+        (curator / "agent.log").write_text("")
+        names = [p.name for p in diagnose.discover_log_files(log_dir)]
+        assert names == ["agent.log"]
+
+    def test_include_curator_walks_snapshot_tree(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "agent.log").write_text("")
+        curator = log_dir / "curator" / "20260704_205000"
+        curator.mkdir(parents=True)
+        (curator / "agent.log").write_text("")
+        (curator / "errors.log").write_text("")
+        names = [p.name for p in diagnose.discover_log_files(log_dir, include_curator=True)]
+        assert names.count("agent.log") == 2
+        assert "errors.log" in names
+
+
+class TestScanLogTruncations:
+    def test_no_log_files_ok(self) -> None:
+        result = diagnose.scan_log_truncations([], 0.0)
+        assert result["ok"] is True
+        assert result["length_class_hits"] == 0
+        assert result["stream_drop_warnings"] == 0
+        assert result["files_scanned"] == 0
+
+    def test_warning_level_triggers_length_hit(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        now = _now_dt()
+        agent = log_dir / "agent.log"
+        agent.write_text(_log_line("WARNING", "finish_reason='length' output=12345", now))
+        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        assert result["length_class_hits"] == 1
+        assert result["matches"][0]["file"] == "agent.log"
+
+    def test_info_level_does_not_trigger(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        now = _now_dt()
+        body = "user said: 'Response truncated (finish_reason='length')...'"
+        agent = log_dir / "agent.log"
+        agent.write_text(_log_line("INFO", body, now))
+        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        assert result["length_class_hits"] == 0
+
+    def test_stream_drop_counted_separately(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        now = _now_dt()
+        body = "Stream ended with no finish_reason while a tool call's arguments were still incomplete"
+        agent = log_dir / "agent.log"
+        agent.write_text(_log_line("WARNING", body, now))
+        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        assert result["length_class_hits"] == 0
+        assert result["stream_drop_warnings"] == 1
+
+    def test_old_lines_filtered_by_window(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        old = _now_dt() - timedelta(days=30)
+        agent = log_dir / "agent.log"
+        agent.write_text(_log_line("ERROR", "finish_reason='length' (old)", old))
+        result = diagnose.scan_log_truncations([agent], (old + timedelta(days=1)).timestamp())
+        assert result["length_class_hits"] == 0
+
+    def test_double_quoted_finish_reason(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        now = _now_dt()
+        errors = log_dir / "errors.log"
+        errors.write_text(_log_line("ERROR", 'finish_reason="length" output=9999', now))
+        result = diagnose.scan_log_truncations([errors], (now - timedelta(hours=1)).timestamp())
+        assert result["length_class_hits"] == 1
+
+    def test_aggregates_across_multiple_files(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        now = _now_dt()
+        agent = log_dir / "agent.log"
+        errors = log_dir / "gateway.log"
+        tui = log_dir / "tui_gateway_crash.log"
+        agent.write_text(_log_line("WARNING", "finish_reason='length' a", now))
+        errors.write_text(_log_line("ERROR", "finish_reason='length' b", now))
+        with errors.open("a") as fh:
+            fh.write(_log_line("ERROR", "hit max output tokens c", now))
+        tui.write_text(_log_line("CRITICAL", "finish_reason='length' d", now))
+        result = diagnose.scan_log_truncations(
+            [agent, errors, tui], (now - timedelta(hours=1)).timestamp(),
+        )
+        assert result["length_class_hits"] == 4
+        assert result["files_scanned"] == 3
+        per_file = {Path(p["path"]).name: p for p in result["per_file"]}
+        assert per_file["agent.log"]["length_class_hits"] == 1
+        assert per_file["gateway.log"]["length_class_hits"] == 2
+        assert per_file["tui_gateway_crash.log"]["length_class_hits"] == 1
+
+    def test_window_applied_per_line_in_long_file(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        old = _now_dt() - timedelta(days=10)
+        recent = _now_dt() - timedelta(hours=1)
+        agent = log_dir / "agent.log"
+        agent.write_text(
+            _log_line("ERROR", "finish_reason='length' (old)", old)
+            + _log_line("ERROR", "finish_reason='length' (recent)", recent)
+        )
+        result = diagnose.scan_log_truncations(
+            [agent], (_now_dt() - timedelta(days=2)).timestamp(),
+        )
+        assert result["length_class_hits"] == 1
+        assert "(recent)" in result["matches"][0]["line"]
+
+    def test_missing_file_reported_not_crashed(self, tmp_path: Path) -> None:
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        result = diagnose.scan_log_truncations([log_dir / "nope.log"], 0.0)
+        assert result["ok"] is True
+        assert result["files_scanned"] == 0
+        assert result["files_missing"] == 1
+        assert result["per_file"][0]["scanned"] is False
