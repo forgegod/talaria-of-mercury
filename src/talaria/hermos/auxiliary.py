@@ -1,12 +1,12 @@
 """Derive ``model.aliases._<usecase>`` from a profile's ``auxiliary`` block.
 
 Hermes profiles can pin per-usecase models under
-``auxiliary.<usecase>.model``. This feature reads the *same* profile's
+``auxiliary.<usecase>.model``. This feature reads the profile's own
 ``config.yaml`` and surfaces those pins as top-level
 ``model.aliases._<usecase>`` entries so the running profile can reference
-them by name. Unlike the retired ``talaria sync`` phase (which copied
-auxiliary pins from a *source* profile onto a *target*), this operates on
-a single profile's own config — no source/target split.
+them by name. This is a single-profile operation — no source/target
+split (unlike ``talaria config sync``, which copies artefacts between
+two profiles).
 
 Semantics:
 

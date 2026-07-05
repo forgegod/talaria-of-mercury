@@ -1,6 +1,6 @@
 """Tests for talaria.hermos.refresh_catalog.
 
-Layout (mirrors test_moa_truncation.py):
+Layout:
 
 * TestReshape — model/manifest round-trip
 * TestCredentialDiscovery — env-var precedence + .env fallback + exact-key matching

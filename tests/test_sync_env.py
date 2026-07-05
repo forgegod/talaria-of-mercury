@@ -2,9 +2,7 @@
 
 Covers the single-profile API: the profile's own .env values are refreshed
 from a source environment dictionary, but the file's variable *set* is
-never extended. Mirrors the semantics of the retired
-``~/.config/shell/sync-secrets.sh`` shell helper, now expressed as a
-Talaria feature.
+never extended.
 """
 
 from __future__ import annotations
@@ -392,7 +390,7 @@ class TestSyncEnvAddKeys:
         assert Path(report["backup"]).read_text() == "FOO=keep\n"
 
     def test_no_add_keys_preserves_original_behaviour(self, tmp_path: Path) -> None:
-        """Default path (no --add-key) is byte-identical to the legacy refresh."""
+        """Default path (no --add-key) is byte-identical to the value-only refresh."""
         env_file = tmp_path / ".env"
         original = "FOO=keep\n"
         env_file.write_text(original)

@@ -1,9 +1,8 @@
 """Tests for talaria.hermos.auxiliary — single-profile alias derivation.
 
-These cover the same semantics the retired ``talaria sync`` auxiliary
-phase did (sentinel skipping, alias preservation, idempotency, dry-run),
-but against the single-profile API: the profile's own ``auxiliary`` block
-feeds its own ``model.aliases``.
+These cover the alias-derivation contract (sentinel skipping, alias
+preservation, idempotency, dry-run) against the single-profile API:
+the profile's own ``auxiliary`` block feeds its own ``model.aliases``.
 """
 
 from __future__ import annotations
