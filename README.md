@@ -29,7 +29,7 @@ Every command follows the same conventions: profile-aware path resolution, struc
 |---------|-------|---------|
 | `talaria paths` | — | Print the resolved profile + paths Talaria would inspect. |
 | `talaria completion <shell>` | — | Print a bash or zsh shell completion script. |
-| `talaria hermes diagnose` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
+| `talaria hermes doctor` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
 | `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. Parallel subprocess execution (`--jobs`). |
 | `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
 | `talaria hermes fix-context-cache` | maintenance | Repair curated known-bad entries in a profile's context cache. |
@@ -103,7 +103,7 @@ This is the pattern for: `hermes refresh-catalog`, `hermes fix-context-cache`,
 and get the exit code only. This is the pattern for:
 
 - `talaria paths` — its output *is* the resolved profile + paths.
-- `talaria hermes diagnose` — the 11-detector anomaly report.
+- `talaria hermes doctor` — the 11-detector anomaly report.
 - `talaria hermes benchmark` — the per-model health/cost/capability report.
 - `talaria hermes log-rotate` — explicit-only: with no action flags it reports
   scanned size/age and exits 0 without writing.
@@ -136,10 +136,10 @@ Every feature with path resolution accepts `--show-resolution`: it prints what T
 talaria paths
 
 # Run the multi-detector profile anomaly scan against the active profile
-talaria hermes diagnose
+talaria hermes doctor
 
 # Preview config suggestions from the free-flight curator pass without writing
-talaria hermes diagnose --apply-suggestions --dry-run
+talaria hermes doctor --apply-suggestions --dry-run
 
 # Benchmark every model: health + cost + latency + capabilities + vision
 talaria hermes benchmark
@@ -170,17 +170,17 @@ talaria hermes serve-stop
 eval "$(talaria completion zsh)"
 ```
 
-## Feature: `talaria hermes diagnose`
+## Feature: `talaria hermes doctor`
 
 Runs 11 structured detectors against the resolved profile's `state.db` and `logs/`, plus a default-on free-flight curator pass that hands the assembled evidence to the operator's configured `_curator` model for open-ended anomaly detection and config suggestions. The free-flight pass is the only way the structured detectors catch unknown-unknown anomalies — pass `--no-free-flight` for pure deterministic results. Use `--apply-suggestions` to write config-suggestion findings into the profile's `config.yaml` (atomic backup first; `--dry-run` previews the diff).
 
 ### Usage
 
 ```bash
-talaria hermes diagnose
-talaria hermes diagnose --profile hermes-vc
-talaria hermes diagnose --no-free-flight --json --days 7
-talaria hermes diagnose --only truncation_output,zombie_sessions
+talaria hermes doctor
+talaria hermes doctor --profile hermes-vc
+talaria hermes doctor --no-free-flight --json --days 7
+talaria hermes doctor --only truncation_output,zombie_sessions
 ```
 
 ### Flags

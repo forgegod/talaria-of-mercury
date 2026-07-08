@@ -41,7 +41,7 @@ class TestCollect:
         hermes = next(s for s in root.subcommands if s.name == "hermes")
         names = {s.name for s in hermes.subcommands}
         assert names == {
-            "diagnose", "benchmark", "refresh-catalog", "fix-context-cache",
+            "doctor", "benchmark", "refresh-catalog", "fix-context-cache",
             "serve-stop", "log-rotate",
         }
 
@@ -51,15 +51,15 @@ class TestCollect:
         names = {s.name for s in config.subcommands}
         assert names == {"sync", "apply-auxiliary", "sync-env"}
 
-    def test_skills_group_has_three_commands(self) -> None:
+    def test_skills_group_has_four_commands(self) -> None:
         root = completion.collect(build_parser())
         skills = next(s for s in root.subcommands if s.name == "skills")
         names = {s.name for s in skills.subcommands}
-        assert names == {"install", "uninstall", "create-category"}
+        assert names == {"install", "uninstall", "create-category", "prune"}
 
     def test_leaf_subcommand_has_options(self) -> None:
         root = completion.collect(build_parser())
-        diag = self._find(root, ["hermes", "diagnose"])
+        diag = self._find(root, ["hermes", "doctor"])
         assert diag is not None
         flag_set = {f for opt in diag.options for f in opt.flags}
         assert "--json" in flag_set
@@ -67,14 +67,14 @@ class TestCollect:
 
     def test_option_takes_arg_detected(self) -> None:
         root = completion.collect(build_parser())
-        diag = self._find(root, ["hermes", "diagnose"])
+        diag = self._find(root, ["hermes", "doctor"])
         assert diag is not None
         days = next(opt for opt in diag.options if "--days" in opt.flags)
         assert days.takes_arg is True
 
     def test_store_true_option_takes_no_arg(self) -> None:
         root = completion.collect(build_parser())
-        diag = self._find(root, ["hermes", "diagnose"])
+        diag = self._find(root, ["hermes", "doctor"])
         assert diag is not None
         json_opt = next(opt for opt in diag.options if "--json" in opt.flags)
         assert json_opt.takes_arg is False
@@ -115,7 +115,7 @@ class TestBash:
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["diagnose", "benchmark", "refresh-catalog", "sync-env", "apply-auxiliary"]:
+        for name in ["doctor", "benchmark", "refresh-catalog", "sync-env", "apply-auxiliary"]:
             assert name in script
 
     def test_contains_option_flags(self) -> None:
@@ -128,7 +128,7 @@ class TestBash:
         script = self.render()
         # Two-level paths like "config sync" must be quoted case patterns
         assert '"config sync")' in script
-        assert '"hermes diagnose")' in script
+        assert '"hermes doctor")' in script
 
     def test_root_branch_not_emitted_first(self) -> None:
         # The root (lineage=[]) must NOT produce a "*" branch before the
@@ -170,7 +170,7 @@ echo "TOP:${COMPREPLY[*]}"
 COMP_WORDS=(talaria config ""); COMP_CWORD=2
 _talaria_completion
 echo "CONFIG:${COMPREPLY[*]}"
-COMP_WORDS=(talaria hermes diagnose -); COMP_CWORD=3
+COMP_WORDS=(talaria hermes doctor -); COMP_CWORD=3
 _talaria_completion
 echo "DIAG_FLAGS:${COMPREPLY[*]}"
 """
@@ -220,7 +220,7 @@ class TestZsh:
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["diagnose", "benchmark", "refresh-catalog", "sync-env", "serve-stop"]:
+        for name in ["doctor", "benchmark", "refresh-catalog", "sync-env", "serve-stop"]:
             assert name in script
 
     def test_contains_option_specs(self) -> None:

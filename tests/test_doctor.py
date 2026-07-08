@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.diagnose, diagnose_llm, and diagnose_free_flight.
+"""Tests for talaria.hermos.doctor, doctor_llm, and doctor_free_flight.
 
 The canonical fixture lives in :mod:`tests._helpers.make_full_state_db`,
 which mirrors the production Hermes sessions / messages / compression_locks
@@ -17,9 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from talaria.hermos import diagnose, diagnose_free_flight, diagnose_llm
-from talaria.hermos.diagnose import DetectorResult
+from talaria.hermos import doctor, doctor_free_flight, doctor_llm
+from talaria.hermos.doctor import DetectorResult
 from talaria.paths import ResolvedPaths
+from talaria.sync.yaml_io import dump_yaml
 from tests._helpers import make_full_state_db
 
 
@@ -56,13 +57,13 @@ class TestTruncationOutput:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_truncation_output(
-                con, (_now() - 86400), diagnose.OUTPUT_TOKEN_ALERT,
+            r = doctor.detector_truncation_output(
+                con, (_now() - 86400), doctor.OUTPUT_TOKEN_ALERT,
             )
         finally:
             con.close()
-        assert r.id == diagnose.TRUNCATION_OUTPUT
-        assert r.severity == diagnose.SEVERITY_INFO
+        assert r.id == doctor.TRUNCATION_OUTPUT
+        assert r.severity == doctor.SEVERITY_INFO
         assert r.fired is False
 
     def test_high_output_session_fires(self, tmp_path: Path) -> None:
@@ -80,12 +81,12 @@ class TestTruncationOutput:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_truncation_output(
-                con, now - 86400, diagnose.OUTPUT_TOKEN_ALERT,
+            r = doctor.detector_truncation_output(
+                con, now - 86400, doctor.OUTPUT_TOKEN_ALERT,
             )
         finally:
             con.close()
-        assert r.severity == diagnose.SEVERITY_ALERT
+        assert r.severity == doctor.SEVERITY_ALERT
         assert r.fired is True
         assert any(s["id"] == "s1" for s in r.evidence["flagged"])
 
@@ -93,7 +94,7 @@ class TestTruncationOutput:
         """Sessions at 0.75x–1.0x of the threshold are borderline but not flagged."""
         db = tmp_path / "state.db"
         now = _now()
-        threshold = diagnose.OUTPUT_TOKEN_ALERT
+        threshold = doctor.OUTPUT_TOKEN_ALERT
         make_full_state_db(db, sessions=[
             {"id": "borderline", "source": "cli", "model": "minimax/minimax-m3",
              "started_at": now, "output_tokens": int(threshold * 0.8),
@@ -107,7 +108,7 @@ class TestTruncationOutput:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_truncation_output(con, now - 86400, threshold)
+            r = doctor.detector_truncation_output(con, now - 86400, threshold)
         finally:
             con.close()
         # Both sessions present; only the borderline one is in the
@@ -128,10 +129,10 @@ class TestCompressionStaleLocks:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_compression_stale_locks(con, _now())
+            r = doctor.detector_compression_stale_locks(con, _now())
         finally:
             con.close()
-        assert r.severity == diagnose.SEVERITY_INFO
+        assert r.severity == doctor.SEVERITY_INFO
         assert r.evidence["locks"] == []
 
     def test_expired_lock_fires(self, tmp_path: Path) -> None:
@@ -149,11 +150,11 @@ class TestCompressionStaleLocks:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_compression_stale_locks(con, now)
+            r = doctor.detector_compression_stale_locks(con, now)
         finally:
             con.close()
         assert r.fired is True
-        assert r.severity == diagnose.SEVERITY_ALERT
+        assert r.severity == doctor.SEVERITY_ALERT
         assert r.evidence["locks"][0]["session_id"] == "s1"
 
 
@@ -172,7 +173,7 @@ class TestCompressionFailures:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_compression_failures(con, now - 86400)
+            r = doctor.detector_compression_failures(con, now - 86400)
         finally:
             con.close()
         assert r.fired is True
@@ -195,7 +196,7 @@ class TestZombieSessions:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_zombie_sessions(con, now)
+            r = doctor.detector_zombie_sessions(con, now)
         finally:
             con.close()
         assert r.fired is True
@@ -215,7 +216,7 @@ class TestZombieSessions:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_zombie_sessions(con, now)
+            r = doctor.detector_zombie_sessions(con, now)
         finally:
             con.close()
         assert r.fired is False
@@ -239,11 +240,11 @@ class TestGhostSessions:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_ghost_sessions(con, now - 86400)
+            r = doctor.detector_ghost_sessions(con, now - 86400)
         finally:
             con.close()
         assert r.fired is True
-        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.severity == doctor.SEVERITY_WARN
         assert r.evidence["sessions"][0]["id"] == "ghost"
 
 
@@ -266,11 +267,11 @@ class TestRewinds:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_rewinds(con, now - 86400)
+            r = doctor.detector_rewinds(con, now - 86400)
         finally:
             con.close()
         assert r.fired is True
-        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.severity == doctor.SEVERITY_WARN
         assert r.borderline is True  # at least one session in the 2–3 band
 
 
@@ -290,7 +291,7 @@ class TestCostAnomalies:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_cost_anomalies(con, now - 86400)
+            r = doctor.detector_cost_anomalies(con, now - 86400)
         finally:
             con.close()
         assert r.fired is True
@@ -313,10 +314,10 @@ class TestCostAnomalies:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_cost_anomalies(con, now - 86400)
+            r = doctor.detector_cost_anomalies(con, now - 86400)
         finally:
             con.close()
-        assert r.severity == diagnose.SEVERITY_WARN
+        assert r.severity == doctor.SEVERITY_WARN
         assert r.fired is False  # 10% is not >= 25%
         assert r.borderline is True
 
@@ -335,7 +336,7 @@ class TestCostAnomalies:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
         try:
-            r = diagnose.detector_cost_anomalies(con, now - 86400)
+            r = doctor.detector_cost_anomalies(con, now - 86400)
         finally:
             con.close()
         assert r.fired is True
@@ -350,9 +351,9 @@ class TestOrchestrator:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(paths, days=2, free_flight=False)
+        report = doctor.run(paths, days=2, free_flight=False)
         assert report["fired"] is False
-        assert len(report["per_detector"]) == len(diagnose.DETECTOR_IDS)
+        assert len(report["per_detector"]) == len(doctor.DETECTOR_IDS)
 
     def test_run_with_zombie_fires(self, tmp_path: Path) -> None:
         db = tmp_path / "state.db"
@@ -366,7 +367,7 @@ class TestOrchestrator:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(paths, days=2, free_flight=False)
+        report = doctor.run(paths, days=2, free_flight=False)
         assert report["fired"] is True
         by_id = {d["id"]: d for d in report["per_detector"]}
         assert by_id["zombie_sessions"]["fired"] is True
@@ -377,12 +378,12 @@ class TestOrchestrator:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(
+        report = doctor.run(
             paths, days=2,
-            only=(diagnose.ZOMBIE_SESSIONS,),
+            only=(doctor.ZOMBIE_SESSIONS,),
             free_flight=False,
         )
-        assert report["selected_detectors"] == [diagnose.ZOMBIE_SESSIONS]
+        assert report["selected_detectors"] == [doctor.ZOMBIE_SESSIONS]
         assert len(report["per_detector"]) == 1
 
     def test_run_skip_excludes_detectors(self, tmp_path: Path) -> None:
@@ -391,14 +392,14 @@ class TestOrchestrator:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(
+        report = doctor.run(
             paths, days=2,
-            skip=(diagnose.ZOMBIE_SESSIONS, diagnose.GHOST_SESSIONS),
+            skip=(doctor.ZOMBIE_SESSIONS, doctor.GHOST_SESSIONS),
         )
-        assert diagnose.ZOMBIE_SESSIONS not in report["selected_detectors"]
-        assert diagnose.GHOST_SESSIONS not in report["selected_detectors"]
-        assert diagnose.ZOMBIE_SESSIONS in report["skipped_detectors"]
-        assert diagnose.GHOST_SESSIONS in report["skipped_detectors"]
+        assert doctor.ZOMBIE_SESSIONS not in report["selected_detectors"]
+        assert doctor.GHOST_SESSIONS not in report["selected_detectors"]
+        assert doctor.ZOMBIE_SESSIONS in report["skipped_detectors"]
+        assert doctor.GHOST_SESSIONS in report["skipped_detectors"]
 
     def test_run_unknown_only_raises(self, tmp_path: Path) -> None:
         db = tmp_path / "state.db"
@@ -407,7 +408,7 @@ class TestOrchestrator:
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
         with pytest.raises(ValueError, match="unknown detector"):
-            diagnose.run(paths, days=2, only=("nonsense",))
+            doctor.run(paths, days=2, only=("nonsense",))
 
     def test_run_one_detector_error_does_not_break_others(self, tmp_path: Path) -> None:
         """A single detector crashing must not prevent the others from running."""
@@ -429,8 +430,8 @@ class TestOrchestrator:
         # With a clean state, no deterministic detector fires. The
         # free-flight pass is the only place the runner is called; a
         # runner exception must degrade to a free_flight:error
-        # result, not crash the diagnose command.
-        report = diagnose.run(
+        # result, not crash the `talaria hermes doctor`.
+        report = doctor.run(
             paths, days=2,
             free_flight_runner=boom_runner,
         )
@@ -448,11 +449,11 @@ class TestOrchestrator:
         paths = _paths(
             tmp_path, state_db=tmp_path / "nope.db", log_dir=log_dir,
         )
-        report = diagnose.run(paths, days=2, free_flight=False)
+        report = doctor.run(paths, days=2, free_flight=False)
         # The state.db-backed detectors surface an "info" result
         # noting the missing DB; the log-backed detectors run normally.
         by_id = {d["id"]: d for d in report["per_detector"]}
-        assert by_id[diagnose.TRUNCATION_OUTPUT]["severity"] == diagnose.SEVERITY_INFO
+        assert by_id[doctor.TRUNCATION_OUTPUT]["severity"] == doctor.SEVERITY_INFO
 
 
 # ---------------- Renderer tests ----------------
@@ -464,12 +465,12 @@ class TestRenderer:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(paths, days=2, free_flight=False)
-        code, text = diagnose.render_human(report)
+        report = doctor.run(paths, days=2, free_flight=False)
+        code, text = doctor.render_human(report)
         assert code == 0
         assert "VERDICT: clean" in text
         assert "Signal A" not in text  # no legacy phrasing
-        for det in diagnose.DETECTOR_IDS:
+        for det in doctor.DETECTOR_IDS:
             assert det in text
 
     def test_human_fired(self, tmp_path: Path) -> None:
@@ -484,8 +485,8 @@ class TestRenderer:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
-        report = diagnose.run(paths, days=2, free_flight=False)
-        code, text = diagnose.render_human(report)
+        report = doctor.run(paths, days=2, free_flight=False)
+        code, text = doctor.render_human(report)
         assert code == 1
         assert "VERDICT" in text
         assert "fired" in text.lower()
@@ -494,7 +495,7 @@ class TestRenderer:
 
 # ---------------- Apply config_suggestion tests ----------------
 class TestApplySuggestions:
-    """Tests for diagnose.apply_config_suggestions() — the self-heal path."""
+    """Tests for doctor.apply_config_suggestions() — the self-heal path."""
 
     def _paths(self, tmp_path, *, config_path):
         return ResolvedPaths(
@@ -535,7 +536,7 @@ class TestApplySuggestions:
             slug="lower", yaml_path="moa.presets.coding.max_tokens",
             suggested="16384", current="32768",
         )
-        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=True, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [sug], dry_run=True, config_path=cfg)
         assert rep["ok"] is True
         assert rep["dry_run"] is True
         assert len(rep["applied"]) == 1
@@ -558,7 +559,7 @@ class TestApplySuggestions:
             slug="lower", yaml_path="moa.presets.coding.max_tokens",
             suggested="16384", current="32768",
         )
-        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         assert rep["backup"] is not None
         bak = Path(rep["backup"])
@@ -579,7 +580,7 @@ class TestApplySuggestions:
             slug="add", yaml_path="moa.presets.coding.max_tokens",
             suggested="16384", current="unknown",
         )
-        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         new = cfg.read_text()
         assert "moa:" in new
@@ -602,7 +603,7 @@ class TestApplySuggestions:
             self._suggestion(slug="ab", yaml_path="c", suggested="false"),
             self._suggestion(slug="as", yaml_path="d", suggested="world"),
         ]
-        rep = diagnose.apply_config_suggestions(paths, sugs, dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, sugs, dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         new = cfg.read_text()
         assert "a: 42\n" in new
@@ -617,7 +618,7 @@ class TestApplySuggestions:
         sug = self._suggestion(
             slug="empty", yaml_path="", suggested="x", current="1",
         )
-        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         assert rep["applied"] == []
         assert any(s.get("reason") == "empty yaml_path" for s in rep["skipped"])
@@ -627,7 +628,7 @@ class TestApplySuggestions:
         cfg = tmp_path / "config.yaml"
         cfg.write_text("a: 1\n")
         paths = self._paths(tmp_path, config_path=cfg)
-        rep = diagnose.apply_config_suggestions(paths, [], dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [], dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         assert rep["applied"] == []
         assert rep["backup"] is None
@@ -640,7 +641,7 @@ class TestApplySuggestions:
             slug="add", yaml_path="moa.presets.coding.max_tokens",
             suggested="16384",
         )
-        rep = diagnose.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
+        rep = doctor.apply_config_suggestions(paths, [sug], dry_run=False, config_path=cfg)
         assert rep["ok"] is True
         assert cfg.exists()
         assert "max_tokens: 16384" in cfg.read_text()
@@ -650,7 +651,7 @@ class TestApplySuggestions:
 
 class TestRedaction:
     def test_secret_parent_redacts_children(self) -> None:
-        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
         raw = "auth:\n  token: bearer-abc\n  type: oauth\n"
         out = _redact_raw_yaml(raw)
         assert "auth: ***REDACTED***" in out
@@ -659,27 +660,27 @@ class TestRedaction:
         assert "bearer-abc" not in out
 
     def test_preserves_legitimate_keys(self) -> None:
-        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
         raw = "model:\n  default: gpt-5\nmoa:\n  presets:\n    coding:\n      max_tokens: 32768\n"
         out = _redact_raw_yaml(raw)
         assert "max_tokens: 32768" in out
         assert "default: gpt-5" in out
 
     def test_api_key_redaction(self) -> None:
-        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
         out = _redact_raw_yaml("api_key: sk-secret\nmodel: gpt\n")
         assert "api_key: ***REDACTED***" in out
         assert "sk-secret" not in out
         assert "model: gpt" in out
 
     def test_top_level_secret_key_redaction(self) -> None:
-        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
         out = _redact_raw_yaml("token: abc\nmodel: gpt\n")
         assert "token: ***REDACTED***" in out
         assert "abc" not in out
 
     def test_comments_and_blanks_preserved(self) -> None:
-        from talaria.hermos.diagnose_free_flight import _redact_raw_yaml
+        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
         raw = "# header comment\n\napi_key: sk-x\n# footer\n"
         out = _redact_raw_yaml(raw)
         assert "# header comment" in out
@@ -694,13 +695,13 @@ class TestFreeFlight:
         paths = _paths(
             tmp_path, state_db=tmp_path / "s.db", log_dir=tmp_path / "logs",
         )
-        results = diagnose_free_flight.run(paths, days=2, log_lines=0)
+        results = doctor_free_flight.run(paths, days=2, log_lines=0)
         assert len(results) == 1
         assert results[0].id == "free_flight:skipped"
         assert results[0].fired is False
 
     def test_anomaly_finding_kind_parsed(self) -> None:
-        r = diagnose_free_flight._finding_to_result(
+        r = doctor_free_flight._finding_to_result(
             0, {
                 "kind": "anomaly",
                 "id": "loud_session",
@@ -717,7 +718,7 @@ class TestFreeFlight:
         assert r.evidence["evidence_quote"] == "session s1 output=800000"
 
     def test_config_suggestion_kind_parsed(self) -> None:
-        r = diagnose_free_flight._finding_to_result(
+        r = doctor_free_flight._finding_to_result(
             0, {
                 "kind": "config_suggestion",
                 "id": "lower_max_tokens",
@@ -740,27 +741,27 @@ class TestFreeFlight:
 
     def test_default_kind_is_anomaly(self) -> None:
         """A finding without a 'kind' field defaults to anomaly."""
-        r = diagnose_free_flight._finding_to_result(
+        r = doctor_free_flight._finding_to_result(
             0, {"id": "x", "severity": "info", "summary": "s"},
         )
         assert r.id == "free_flight:anomaly:x"
         assert r.evidence["kind"] == "anomaly"
 
     def test_invalid_kind_falls_back_to_anomaly(self) -> None:
-        r = diagnose_free_flight._finding_to_result(
+        r = doctor_free_flight._finding_to_result(
             0, {"kind": "unicorn", "id": "x", "severity": "info", "summary": "s"},
         )
         assert r.id == "free_flight:anomaly:x"
 
     def test_parse_findings_handles_fenced_json(self) -> None:
         stdout = 'Here is my response: ```json\n{"findings":[{"id":"a","severity":"warn","summary":"b"}]}\n```'
-        findings = diagnose_free_flight._parse_findings(stdout)
+        findings = doctor_free_flight._parse_findings(stdout)
         assert len(findings) == 1
         assert findings[0]["id"] == "a"
 
     def test_parse_findings_empty_for_garbage(self) -> None:
-        assert diagnose_free_flight._parse_findings("not json at all") == []
-        assert diagnose_free_flight._parse_findings("") == []
+        assert doctor_free_flight._parse_findings("not json at all") == []
+        assert doctor_free_flight._parse_findings("") == []
 
     def test_run_with_stub_runner_returns_findings(self, tmp_path: Path) -> None:
         """Free-flight with a stub runner returns the model's findings."""
@@ -791,7 +792,7 @@ class TestFreeFlight:
                 "",
             )
 
-        results = diagnose_free_flight.run(
+        results = doctor_free_flight.run(
             paths, days=2,
             log_lines=200,
             subprocess_runner=stub,
@@ -811,9 +812,9 @@ class TestFreeFlight:
         paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
 
         def stub(prompt, *, timeout, **kw):
-            raise diagnose_llm.AdjudicationUnavailable("offline")
+            raise doctor_llm.AdjudicationUnavailable("offline")
 
-        results = diagnose_free_flight.run(
+        results = doctor_free_flight.run(
             paths, days=2,
             log_lines=200,
             subprocess_runner=stub,
@@ -849,7 +850,7 @@ class TestOrchestratorFreeFlight:
             return (0, '{"findings": []}', "")
 
         # default free_flight=True; pass stub so no hermes chat is called
-        report = diagnose.run(
+        report = doctor.run(
             paths, days=2,
             free_flight=True,
             free_flight_runner=stub,
@@ -867,7 +868,7 @@ class TestOrchestratorFreeFlight:
                 "",
             )
 
-        report = diagnose.run(
+        report = doctor.run(
             paths, days=2,
             free_flight=True, free_flight_log_lines=200,
             free_flight_runner=stub,
@@ -885,7 +886,7 @@ class TestOrchestratorFreeFlight:
 class TestCli:
     def test_help_exits_zero(self) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose", "--help"],
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor", "--help"],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
@@ -909,15 +910,24 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
-             "--no-free-flight", "--json"],
+             "--no-free-flight", "--json",
+             # skill_index_drift reads paths.hermes_root (not the
+             # overridden state_db / log_dir), so it inspects the live
+             # ~/.hermes/ of the operator running the test. Skip it
+             # in CLI subprocess tests; coverage lives in the unit
+             # tests under TestSkillIndexDrift with a hermes_root
+             # built under tmp_path.
+             "--skip", doctor.SKILL_INDEX_DRIFT],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
         payload = json.loads(result.stdout)
         assert payload["fired"] is False
-        assert len(payload["per_detector"]) == len(diagnose.DETECTOR_IDS)
+        # SKILL_INDEX_DRIFT is skipped (see comment above); remaining
+        # detectors are present.
+        assert len(payload["per_detector"]) == len(doctor.DETECTOR_IDS) - 1
 
     def test_fired_run_exits_1(self, tmp_path: Path) -> None:
         db = tmp_path / "state.db"
@@ -931,7 +941,7 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
              "--no-free-flight", "--json"],
             capture_output=True, text=True,
@@ -946,7 +956,7 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
              "--no-free-flight", "--only", "zombie_sessions", "--json"],
             capture_output=True, text=True,
@@ -962,7 +972,7 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
              "--no-free-flight", "--only", "nonsense", "--json"],
             capture_output=True, text=True,
@@ -983,7 +993,7 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
              "--no-free-flight", "--quiet"],
             capture_output=True, text=True,
@@ -999,13 +1009,13 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
-             "--no-free-flight"],
+             "--no-free-flight", "--skip", doctor.SKILL_INDEX_DRIFT],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
-        assert "Profile diagnose" in result.stdout
+        assert "Profile doctor" in result.stdout
         assert "VERDICT: clean" in result.stdout
 
     def test_verbose_prints_human_report(self, tmp_path: Path) -> None:
@@ -1014,13 +1024,13 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
-             "--no-free-flight", "-v"],
+             "--no-free-flight", "-v", "--skip", doctor.SKILL_INDEX_DRIFT],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
-        assert "Profile diagnose" in result.stdout
+        assert "Profile doctor" in result.stdout
         assert "VERDICT: clean" in result.stdout
 
     def test_skipped_header_in_report(self, tmp_path: Path) -> None:
@@ -1030,21 +1040,21 @@ class TestCli:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(db), "--log-dir", str(log_dir),
              "--no-free-flight",
-             "--skip", f"{diagnose.ZOMBIE_SESSIONS},{diagnose.GHOST_SESSIONS}",
+             "--skip", f"{doctor.ZOMBIE_SESSIONS},{doctor.GHOST_SESSIONS},{doctor.SKILL_INDEX_DRIFT}",
              "-v"],
             capture_output=True, text=True,
         )
         assert result.returncode == 0
         assert "skipped:" in result.stdout
-        assert diagnose.ZOMBIE_SESSIONS in result.stdout
-        assert diagnose.GHOST_SESSIONS in result.stdout
+        assert doctor.ZOMBIE_SESSIONS in result.stdout
+        assert doctor.GHOST_SESSIONS in result.stdout
 
     def test_show_resolution(self, tmp_path: Path) -> None:
         result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "diagnose",
+            [sys.executable, "-m", "talaria.cli", "hermes", "doctor",
              "--state-db", str(tmp_path / "nope.db"),
              "--log-dir", str(tmp_path / "nope"),
              "--show-resolution"],
@@ -1058,10 +1068,10 @@ class TestCli:
 
 class TestDiscoverLogFiles:
     def test_empty_dir(self, tmp_path: Path) -> None:
-        assert diagnose.discover_log_files(tmp_path) == []
+        assert doctor.discover_log_files(tmp_path) == []
 
     def test_missing_dir(self, tmp_path: Path) -> None:
-        assert diagnose.discover_log_files(tmp_path / "no-such") == []
+        assert doctor.discover_log_files(tmp_path / "no-such") == []
 
     def test_picks_up_active_and_rotated(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "logs"
@@ -1072,7 +1082,7 @@ class TestDiscoverLogFiles:
         (log_dir / "errors.log").write_text("")
         (log_dir / "tui_gateway_crash.log").write_text("")
         (log_dir / "README.md").write_text("")  # non-log, must be ignored
-        names = [p.name for p in diagnose.discover_log_files(log_dir)]
+        names = [p.name for p in doctor.discover_log_files(log_dir)]
         assert names == [
             "agent.log", "agent.log.1", "agent.log.1.gz",
             "errors.log", "tui_gateway_crash.log",
@@ -1085,7 +1095,7 @@ class TestDiscoverLogFiles:
         curator = log_dir / "curator" / "20260704_205000"
         curator.mkdir(parents=True)
         (curator / "agent.log").write_text("")
-        names = [p.name for p in diagnose.discover_log_files(log_dir)]
+        names = [p.name for p in doctor.discover_log_files(log_dir)]
         assert names == ["agent.log"]
 
     def test_include_curator_walks_snapshot_tree(self, tmp_path: Path) -> None:
@@ -1096,14 +1106,14 @@ class TestDiscoverLogFiles:
         curator.mkdir(parents=True)
         (curator / "agent.log").write_text("")
         (curator / "errors.log").write_text("")
-        names = [p.name for p in diagnose.discover_log_files(log_dir, include_curator=True)]
+        names = [p.name for p in doctor.discover_log_files(log_dir, include_curator=True)]
         assert names.count("agent.log") == 2
         assert "errors.log" in names
 
 
 class TestScanLogTruncations:
     def test_no_log_files_ok(self) -> None:
-        result = diagnose.scan_log_truncations([], 0.0)
+        result = doctor.scan_log_truncations([], 0.0)
         assert result["ok"] is True
         assert result["length_class_hits"] == 0
         assert result["stream_drop_warnings"] == 0
@@ -1115,7 +1125,7 @@ class TestScanLogTruncations:
         now = _now_dt()
         agent = log_dir / "agent.log"
         agent.write_text(_log_line("WARNING", "finish_reason='length' output=12345", now))
-        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        result = doctor.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
         assert result["length_class_hits"] == 1
         assert result["matches"][0]["file"] == "agent.log"
 
@@ -1126,7 +1136,7 @@ class TestScanLogTruncations:
         body = "user said: 'Response truncated (finish_reason='length')...'"
         agent = log_dir / "agent.log"
         agent.write_text(_log_line("INFO", body, now))
-        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        result = doctor.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
         assert result["length_class_hits"] == 0
 
     def test_stream_drop_counted_separately(self, tmp_path: Path) -> None:
@@ -1136,7 +1146,7 @@ class TestScanLogTruncations:
         body = "Stream ended with no finish_reason while a tool call's arguments were still incomplete"
         agent = log_dir / "agent.log"
         agent.write_text(_log_line("WARNING", body, now))
-        result = diagnose.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
+        result = doctor.scan_log_truncations([agent], (now - timedelta(hours=1)).timestamp())
         assert result["length_class_hits"] == 0
         assert result["stream_drop_warnings"] == 1
 
@@ -1146,7 +1156,7 @@ class TestScanLogTruncations:
         old = _now_dt() - timedelta(days=30)
         agent = log_dir / "agent.log"
         agent.write_text(_log_line("ERROR", "finish_reason='length' (old)", old))
-        result = diagnose.scan_log_truncations([agent], (old + timedelta(days=1)).timestamp())
+        result = doctor.scan_log_truncations([agent], (old + timedelta(days=1)).timestamp())
         assert result["length_class_hits"] == 0
 
     def test_double_quoted_finish_reason(self, tmp_path: Path) -> None:
@@ -1155,7 +1165,7 @@ class TestScanLogTruncations:
         now = _now_dt()
         errors = log_dir / "errors.log"
         errors.write_text(_log_line("ERROR", 'finish_reason="length" output=9999', now))
-        result = diagnose.scan_log_truncations([errors], (now - timedelta(hours=1)).timestamp())
+        result = doctor.scan_log_truncations([errors], (now - timedelta(hours=1)).timestamp())
         assert result["length_class_hits"] == 1
 
     def test_aggregates_across_multiple_files(self, tmp_path: Path) -> None:
@@ -1170,7 +1180,7 @@ class TestScanLogTruncations:
         with errors.open("a") as fh:
             fh.write(_log_line("ERROR", "hit max output tokens c", now))
         tui.write_text(_log_line("CRITICAL", "finish_reason='length' d", now))
-        result = diagnose.scan_log_truncations(
+        result = doctor.scan_log_truncations(
             [agent, errors, tui], (now - timedelta(hours=1)).timestamp(),
         )
         assert result["length_class_hits"] == 4
@@ -1190,7 +1200,7 @@ class TestScanLogTruncations:
             _log_line("ERROR", "finish_reason='length' (old)", old)
             + _log_line("ERROR", "finish_reason='length' (recent)", recent)
         )
-        result = diagnose.scan_log_truncations(
+        result = doctor.scan_log_truncations(
             [agent], (_now_dt() - timedelta(days=2)).timestamp(),
         )
         assert result["length_class_hits"] == 1
@@ -1199,8 +1209,111 @@ class TestScanLogTruncations:
     def test_missing_file_reported_not_crashed(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
-        result = diagnose.scan_log_truncations([log_dir / "nope.log"], 0.0)
+        result = doctor.scan_log_truncations([log_dir / "nope.log"], 0.0)
         assert result["ok"] is True
         assert result["files_scanned"] == 0
         assert result["files_missing"] == 1
         assert result["per_file"][0]["scanned"] is False
+
+
+class TestSkillIndexDrift:
+    """The skill_index_drift detector surfaces three classes of drift.
+
+    Mirrors :mod:`talaria.hermos.skill_index` — the detector is a thin
+    read-only consumer of :func:`read_index`.
+    """
+
+    def _setup(self, root: Path, *, profile: str = "vc-client"):
+        """Build a hermes-root layout and return a ResolvedPaths."""
+        root.mkdir(parents=True, exist_ok=True)
+        if profile == "default":
+            state = root / "state.db"
+            logs = root / "logs"
+            cfg = root / "config.yaml"
+            sroot = root / "skills"
+        else:
+            state = root / "profiles" / profile / "state.db"
+            logs = root / "profiles" / profile / "logs"
+            cfg = root / "profiles" / profile / "config.yaml"
+            sroot = root / "profiles" / profile / "skills"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        logs.mkdir(parents=True, exist_ok=True)
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        paths = ResolvedPaths(profile=profile, hermes_root=root, state_db=state, log_dir=logs)
+        return paths, sroot, cfg
+
+    def _make_skill(self, sroot: Path, name: str, *, category: str | None = None) -> Path:
+        d = sroot / category / name if category else sroot / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+        return d
+
+    def _make_lock(self, sroot: Path, names: list[str]) -> Path:
+        hub = sroot / ".hub"
+        hub.mkdir(parents=True, exist_ok=True)
+        lock = hub / "lock.json"
+        installed = {n: {"source": "official", "install_path": n} for n in names}
+        lock.write_text(json.dumps({"version": 1, "installed": installed}))
+        return lock
+
+    def _make_config(self, cfg: Path, disabled: list[str]) -> None:
+        cfg.write_text(dump_yaml({"skills": {"disabled": disabled}}))
+
+    def test_clean_index_is_info(self, tmp_path: Path) -> None:
+        paths, sroot, cfg = self._setup(tmp_path / ".hermes")
+        self._make_skill(sroot, "alpha", category="devops")
+        self._make_lock(sroot, ["alpha"])
+        self._make_config(cfg, [])
+
+        r = doctor.detector_skill_index_drift(paths)
+        assert r.id == doctor.SKILL_INDEX_DRIFT
+        assert r.severity == doctor.SEVERITY_INFO
+        assert r.fired is False
+        assert "consistent" in r.summary.lower()
+
+    def test_filesystem_only_fires_alert(self, tmp_path: Path) -> None:
+        paths, sroot, cfg = self._setup(tmp_path / ".hermes")
+        self._make_skill(sroot, "alpha")
+        self._make_skill(sroot, "beta", category="devops")
+        self._make_lock(sroot, ["alpha"])
+        self._make_config(cfg, [])
+
+        r = doctor.detector_skill_index_drift(paths)
+        assert r.severity == doctor.SEVERITY_ALERT
+        assert r.fired is True
+        assert r.evidence["filesystem_only"] == ["beta"]
+
+    def test_lock_only_fires_alert(self, tmp_path: Path) -> None:
+        paths, sroot, cfg = self._setup(tmp_path / ".hermes")
+        self._make_skill(sroot, "alpha")
+        self._make_lock(sroot, ["alpha", "phantom"])
+        self._make_config(cfg, [])
+
+        r = doctor.detector_skill_index_drift(paths)
+        assert r.fired is True
+        assert r.evidence["lock_only"] == ["phantom"]
+
+    def test_disabled_orphans_fires_alert(self, tmp_path: Path) -> None:
+        paths, sroot, cfg = self._setup(tmp_path / ".hermes")
+        self._make_skill(sroot, "real")
+        self._make_lock(sroot, ["real"])
+        self._make_config(cfg, ["real", "gone"])
+
+        r = doctor.detector_skill_index_drift(paths)
+        assert r.fired is True
+        assert r.evidence["disabled_orphans"] == ["gone"]
+        assert r.evidence["disabled_present"] == ["real"]
+
+    def test_all_three_classes_summary(self, tmp_path: Path) -> None:
+        paths, sroot, cfg = self._setup(tmp_path / ".hermes")
+        self._make_skill(sroot, "alpha")
+        self._make_skill(sroot, "beta")
+        self._make_lock(sroot, ["beta", "phantom"])
+        self._make_config(cfg, ["beta", "gone"])
+
+        r = doctor.detector_skill_index_drift(paths)
+        assert r.fired is True
+        summary = r.summary.lower()
+        assert "filesystem-only" in summary
+        assert "lock-only" in summary
+        assert "disabled-orphans" in summary

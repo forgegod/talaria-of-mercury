@@ -1,8 +1,8 @@
-"""Curator-model subprocess runner for ``talaria hermes diagnose``.
+"""Curator-model subprocess runner for ``talaria hermes doctor``.
 
-This module is the *only* place the diagnose feature talks to a
+This module is the *only* place the doctor feature talks to a
 language model. The free-flight pass in
-:mod:`talaria.hermos.diagnose_free_flight` resolves the curator
+:mod:`talaria.hermos.doctor_free_flight` resolves the curator
 model + provider from the active profile's ``config.yaml`` at
 runtime (see :func:`resolve_curator_config`) and invokes
 :func:`hermes_chat` to call ``hermes chat -q`` with whatever model
@@ -27,7 +27,7 @@ Hardening contract:
 * ``hermes`` must be on ``$PATH``; otherwise the runner raises
   :class:`AdjudicationUnavailable`. The orchestrator catches this
   and degrades to a ``free_flight:unavailable`` result — the
-  diagnose command never breaks because the model was missing.
+  doctor command never breaks because the model was missing.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ ADJUDICATE_TIMEOUT_SECONDS = 90
 class AdjudicationUnavailable(RuntimeError):
     """Raised when the curator model cannot be reached.
 
-    Never propagated by the orchestrator — the diagnose command
+    Never propagated by the orchestrator — the doctor command
     catches this and degrades to a no-op detector result.
     """
 
@@ -68,7 +68,7 @@ def resolve_curator_config(paths: ResolvedPaths) -> tuple[str, str]:
 
     Returns ``(model, provider)``. Never raises on a missing or
     incomplete config — falls back to sensible defaults so the
-    diagnose command degrades gracefully rather than crashing.
+    doctor command degrades gracefully rather than crashing.
 
     Resolution order (first non-empty model wins):
 

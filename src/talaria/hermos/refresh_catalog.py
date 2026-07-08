@@ -325,7 +325,7 @@ def run(
 ) -> dict[str, Any]:
     """Fetch (when needed) and reshape the catalog.
 
-    ``paths`` is accepted for symmetry with :mod:`talaria.hermos.diagnose`
+    ``paths`` is accepted for symmetry with :mod:`talaria.hermos.doctor`
     but is unused — this feature is profile-agnostic by design.
 
     Returned report::
@@ -490,7 +490,7 @@ def show_resolution(
     dst = Path(dst) if dst is not None else default_cache_path(gateway)
     return _json.dumps(
         {
-            "profile": paths.profile,  # unused but kept for symmetry with diagnose
+            "profile": paths.profile,  # unused but kept for symmetry with doctor
             "gateway": config.gateway,
             "provider_id": config.provider_id,
             "credential_env": config.credential_env,

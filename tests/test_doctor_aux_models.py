@@ -53,7 +53,7 @@ import pytest
 import yaml
 
 
-#: Per-call soft timeout for the live hermes chat. The diagnose
+#: Per-call soft timeout for the live hermes chat. The doctor
 #: orchestrator uses 180 s for its primary call; individual model
 #: checks should be faster because the prompt is small. 90 s is a
 #: generous ceiling.
@@ -316,7 +316,7 @@ def _record_bench(target: ModelTarget, ok: bool, dt: float) -> None:
 
 class TestCuratorParity:
     """``model.aliases._curator`` and ``auxiliary.curator.model``
-    must point to the same model id. The diagnose orchestrator
+    must point to the same model id. The doctor orchestrator
     sources the curator from both places; a divergence is a
     silent change that hides one model under the wrong alias.
 

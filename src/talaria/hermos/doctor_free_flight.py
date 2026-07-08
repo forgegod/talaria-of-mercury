@@ -1,4 +1,4 @@
-"""Free-flight open-ended anomaly pass for ``talaria hermes diagnose``.
+"""Free-flight open-ended anomaly pass for ``talaria hermes doctor``.
 
 The free-flight pass assembles a compact evidence bundle (structured
 detector findings + redacted ``config.yaml`` + log-file references +
@@ -31,7 +31,7 @@ Two finding kinds are returned:
 A model failure / parse error / refusal to participate degrades
 to a single ``DetectorResult`` with ``severity=info`` and
 ``model_verdict.error`` set. The free-flight pass never breaks
-the diagnose command.
+the doctor command.
 """
 
 from __future__ import annotations
@@ -40,14 +40,14 @@ import json
 import re
 from typing import Any
 
-from talaria.hermos.diagnose import (
+from talaria.hermos.doctor import (
     SEVERITY_ALERT,
     SEVERITY_INFO,
     SEVERITY_WARN,
     DetectorResult,
     resolve_window,
 )
-from talaria.hermos import diagnose_llm
+from talaria.hermos import doctor_llm
 from talaria.paths import ResolvedPaths
 
 #: Per-file line cap when the framework inlines the logs folder
@@ -348,9 +348,9 @@ def _resolve_config_path(paths: ResolvedPaths) -> Path:
 
 
 def _discover_log_files(paths: ResolvedPaths, include_curator: bool) -> list[Path]:
-    """Use the diagnose log-discovery so behaviour stays consistent."""
-    from talaria.hermos import diagnose
-    return diagnose.discover_log_files(
+    """Use the doctor log-discovery so behaviour stays consistent."""
+    from talaria.hermos import doctor
+    return doctor.discover_log_files(
         paths.log_dir, include_curator=include_curator,
     )
 
@@ -443,8 +443,8 @@ def _findings_for_prompt(paths: ResolvedPaths) -> list[dict[str, Any]]:
     pruned list suitable for inline inclusion in the model
     prompt.
     """
-    from talaria.hermos import diagnose
-    report = diagnose.run(
+    from talaria.hermos import doctor
+    report = doctor.run(
         paths, days=0, since=None, include_curator=False, free_flight=False,
     )
     out = []
@@ -472,7 +472,7 @@ def run(
     since: str | None = None,
     log_lines: int = DEFAULT_LOG_LINES,
     include_curator: bool = False,
-    subprocess_runner=diagnose_llm.hermes_chat,
+    subprocess_runner=doctor_llm.hermes_chat,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     model: str | None = None,
     provider: str | None = None,
@@ -486,7 +486,7 @@ def run(
 
     The curator model + provider are resolved from the active
     profile's ``config.yaml`` via
-    :func:`diagnose_llm.resolve_curator_config` when ``model`` /
+    :func:`doctor_llm.resolve_curator_config` when ``model`` /
     ``provider`` are ``None``. Explicit kwargs override the config
     lookup (used by tests to pin a stub). The resolved values are
     passed to ``subprocess_runner(prompt, model=..., provider=..., timeout=...)``.
@@ -507,7 +507,7 @@ def run(
     # Resolve the curator model + provider from the profile config.
     # Explicit kwargs (tests) override the config lookup.
     if model is None or provider is None:
-        cfg_model, cfg_provider = diagnose_llm.resolve_curator_config(paths)
+        cfg_model, cfg_provider = doctor_llm.resolve_curator_config(paths)
         if model is None:
             model = cfg_model
         if provider is None:
@@ -550,7 +550,7 @@ def run(
         rc, stdout, stderr = subprocess_runner(
             prompt, model=model, provider=provider, timeout=timeout,
         )
-    except diagnose_llm.AdjudicationUnavailable as exc:
+    except doctor_llm.AdjudicationUnavailable as exc:
         return [DetectorResult(
             id="free_flight:unavailable",
             severity=SEVERITY_INFO,

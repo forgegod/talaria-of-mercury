@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-# Minimal session columns required by the diagnose signal-a SQL
+# Minimal session columns required by the doctor signal-a SQL
 # (kept exactly as-is for backward compatibility with the existing
 # test fixtures).
 _SESSIONS_MIN = """
@@ -20,7 +20,7 @@ CREATE TABLE sessions (
 )
 """
 
-# Full Hermes session columns used by the diagnose detectors.
+# Full Hermes session columns used by the doctor detectors.
 # Mirrors the production schema in `state.db` (see vc-client
 # introspection at session start).
 _SESSIONS_FULL = """
@@ -119,11 +119,11 @@ def make_full_state_db(
 ) -> None:
     """Create a state.db with the full Hermes schema (sessions, messages, locks).
 
-    Parameters mirror the production tables the diagnose command
+    Parameters mirror the production tables the `talaria hermes doctor`
     actually reads. Each row is a dict whose keys are subset of the
     table columns; missing columns default to NULL/0 per the schema.
 
-    Use this for the diagnose tests; the minimal ``make_sessions_db``
+    Use this for the doctor tests; the minimal ``make_sessions_db``
     stays for any test that only needs the signal-a fixture format.
     """
     path.parent.mkdir(parents=True, exist_ok=True)

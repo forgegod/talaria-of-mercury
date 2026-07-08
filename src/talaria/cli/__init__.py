@@ -2,7 +2,7 @@
 
 The top-level ``talaria`` entry point (:func:`main`) dispatches to a
 *feature group* (currently just ``hermes``) and then to the named
-feature (e.g. ``diagnose``). New feature groups add a new module
+feature (e.g. ``doctor``). New feature groups add a new module
 in this package without touching the dispatcher.
 """
 
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import talaria
-from talaria.hermos import diagnose as diagnose_module
+from talaria.hermos import doctor as doctor_module
 from talaria.hermos import refresh_catalog as refresh_catalog_module
 from talaria.hermos import benchmark as benchmark_module
 from talaria.paths import resolve_paths
@@ -66,26 +66,26 @@ def cmd_paths(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------- Subcommand: talaria hermes diagnose ----------
+# ---------- Subcommand: talaria hermes doctor ----------
 def _parse_csv(value: str) -> tuple[str, ...]:
     """Parse a comma-separated string into a tuple of trimmed, non-empty ids."""
     return tuple(p.strip() for p in value.split(",") if p.strip())
 
 
-def cmd_hermes_diagnose(args: argparse.Namespace) -> int:
-    from talaria.hermos import diagnose
+def cmd_hermes_doctor(args: argparse.Namespace) -> int:
+    from talaria.hermos import doctor
     paths = resolve_paths(
         profile_flag=args.profile,
         state_db_flag=args.state_db,
         log_dir_flag=args.log_dir,
     )
     if args.show_resolution:
-        print(diagnose.show_resolution(paths))
+        print(doctor.show_resolution(paths))
         return 0
     only = _parse_csv(args.only) if args.only else ()
     skip = _parse_csv(args.skip) if args.skip else ()
     try:
-        report = diagnose.run(
+        report = doctor.run(
             paths,
             days=args.days,
             since=args.since,
@@ -97,13 +97,13 @@ def cmd_hermes_diagnose(args: argparse.Namespace) -> int:
             apply_dry_run=args.dry_run,
         )
     except ValueError as exc:
-        print(f"talaria hermes diagnose: {exc}", file=sys.stderr)
+        print(f"talaria hermes doctor: {exc}", file=sys.stderr)
         return 2
     if args.json:
         _print_json(report)
         return 1 if report["fired"] else 0
     if not args.quiet:
-        exit_code, text = diagnose.render_human(report)
+        exit_code, text = doctor.render_human(report)
         print(text)
         return exit_code
     return 1 if report["fired"] else 0
@@ -308,6 +308,27 @@ def cmd_hermes_skills_create_category(args: argparse.Namespace) -> int:
         print(text)
         return exit_code
     return 0 if report["ok"] else 2
+
+
+# ---------- Subcommand: talaria skills prune ----------
+def cmd_hermes_skills_prune(args: argparse.Namespace) -> int:
+    from talaria.hermos import skill_prune
+
+    paths = resolve_paths(profile_flag=args.profile)
+    report = skill_prune.run(
+        paths,
+        prune_filesystem_only=args.prune_filesystem_only,
+        prune_lock_only=args.prune_lock_only,
+        prune_disabled_orphans=args.prune_disabled_orphans,
+        apply=args.apply,
+        no_backup=args.no_backup,
+    )
+    if args.json:
+        _print_json(skill_prune.report_to_dict(report))
+        return 0
+    exit_code, text = skill_prune.render_human(report)
+    print(text)
+    return exit_code
 
 
 # ---------- Subcommand: talaria config sync ----------
@@ -632,19 +653,27 @@ def build_parser() -> argparse.ArgumentParser:
     # talaria hermes ...
     hermes = sub.add_parser(
         "hermes", help="Maintenance commands targeting Hermes Agent state.",
-        description="Subcommands that inspect state.db and/or logs/.",
+        description=(
+            "Subcommands that inspect the profile's state.db, logs/, and "
+            "skill registry, plus narrowly scoped maintenance tasks."
+        ),
     )
     hermes_sub = hermes.add_subparsers(dest="hermes_command", required=True, metavar="COMMAND")
 
-    # talaria hermes diagnose
+    # talaria hermes doctor
     p_diag = hermes_sub.add_parser(
-        "diagnose",
-        help="Run multi-detector profile anomaly scan (state.db + logs).",
+        "doctor",
+        help=(
+            "Inspect the profile for anomalies (state.db + logs + skills registry) "
+            "and optionally apply curator-driven config fixes."
+        ),
         description=(
-            "Run every selected detector against the profile's state.db "
-            "and logs/. The free-flight curator pass (the operator's "
+            "Run every selected detector against the profile's state.db, "
+            "logs/, and skill registry "
+            "(<skills_root>/.hub/lock.json plus skills.disabled in "
+            "config.yaml). The free-flight curator pass (the operator's "
             "configured _curator model analysing the assembled evidence) "
-            "runs by default — it is the only way the structured 11-detector "
+            "runs by default — it is the only way the structured 12-detector "
             "pass catches unknown-unknown anomalies and config improvements. "
             "Pass --no-free-flight for pure deterministic results. "
             "config_suggestion findings from the free-flight pass are "
@@ -652,7 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_diag.add_argument(
-        "--days", type=int, default=diagnose_module.DEFAULT_LOOKBACK_DAYS,
+        "--days", type=int, default=doctor_module.DEFAULT_LOOKBACK_DAYS,
         help="Look-back window in days (default: 2).",
     )
     p_diag.add_argument(
@@ -667,7 +696,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--only", type=str, default="",
         help=(
             "Comma-separated list of detector ids to run exclusively "
-            f"(e.g. {diagnose_module.TRUNCATION_OUTPUT},{diagnose_module.ZOMBIE_SESSIONS})."
+            f"(e.g. {doctor_module.TRUNCATION_OUTPUT},{doctor_module.ZOMBIE_SESSIONS})."
         ),
     )
     p_diag.add_argument(
@@ -678,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-free-flight", action="store_true",
         help=(
             "Skip the free-flight curator pass; the report uses only "
-            "the deterministic 11-detector verdicts. Off by default; "
+            "the deterministic 12-detector verdicts. Off by default; "
             "the operator passes this for pure-deterministic runs or "
             "to keep the command hermes-free (no model call)."
         ),
@@ -728,7 +757,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true",
         help="Print the human-readable report (default behaviour; kept for convenience).",
     )
-    p_diag.set_defaults(func=cmd_hermes_diagnose, quiet=False)
+    p_diag.set_defaults(func=cmd_hermes_doctor, quiet=False)
 
     # talaria hermes benchmark
     p_bench = hermes_sub.add_parser(
@@ -1166,6 +1195,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_skill_create_cat.set_defaults(func=cmd_hermes_skills_create_category)
+
+    # talaria skills prune
+    p_skill_prune = skills_sub.add_parser(
+        "prune",
+        help="Reconcile on-disk skills, lock.json, and skills.disabled for a profile.",
+        description=(
+            "Detect and (with --apply) resolve drift between three sources "
+            "of skill state in the active profile: the on-disk "
+            "<skills_root>/**/SKILL.md walk, the <skills_root>/.hub/lock.json "
+            "registry, and skills.disabled in the profile's config.yaml. "
+            "Pair with `talaria hermes doctor` (skill_index_drift detector) "
+            "for the read-only view. --dry-run is the default — pass --apply "
+            "to execute. None of --prune-filesystem-only, --prune-lock-only, "
+            "or --prune-disabled-orphans set defaults to ON, so the bare "
+            "command is a no-op."
+        ),
+    )
+    p_skill_prune.add_argument(
+        "--prune-filesystem-only", action="store_true",
+        help="Delete on-disk skill directories that are missing from lock.json "
+             "(filesystem install that bypassed `hermes skills install`).",
+    )
+    p_skill_prune.add_argument(
+        "--prune-lock-only", action="store_true",
+        help="Drop lock.json entries whose on-disk directory is gone "
+             "(orphan lock entry from a manual rm -rf).",
+    )
+    p_skill_prune.add_argument(
+        "--prune-disabled-orphans", action="store_true",
+        help="Remove skills.disabled names that are not on disk and not in lock "
+             "(stale policy entry; harmless but a clean policy should not reference nothing).",
+    )
+    p_skill_prune.add_argument(
+        "--profile", help="Hermes profile to prune (default: active profile).",
+    )
+    p_skill_prune.add_argument(
+        "--apply", action="store_true",
+        help="Execute the planned prune (default: dry-run preview).",
+    )
+    p_skill_prune.add_argument(
+        "--no-backup", action="store_true",
+        help="Skip .bak backup before overwriting lock.json or config.yaml.",
+    )
+    p_skill_prune.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_skill_prune.set_defaults(func=cmd_hermes_skills_prune)
 
     # talaria config ...
     config_grp = sub.add_parser(

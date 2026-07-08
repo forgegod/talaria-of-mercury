@@ -9,9 +9,15 @@ Pytest suite for the Talaria CLI and library.
 - One test module per feature: `test_paths.py` for path resolution,
   `test_refresh_catalog.py`,
   `test_context_cache_fix.py`, `test_auxiliary.py`, `test_sync.py`,
-  and `test_diagnose.py` for feature coverage. `test_skill_install.py`
+  and `test_doctor.py` for feature coverage. `test_skill_install.py`
   covers recursive skill install orchestration.
-  `test_diagnose_aux_models.py` is a live-model benchmark suite
+  `test_skill_index.py` covers the read-side skill-index reader
+  (filesystem walk + lock.json + `skills.disabled`); shared by the
+  `doctor` `skill_index_drift` detector and the
+  `talaria skills prune` tool. `test_skill_prune.py` covers the
+  write-side reconcile (filesystem-only, lock-only, disabled-orphans
+  prune classes, dry-run vs apply, renderer exit codes).
+  `test_doctor_aux_models.py` is a live-model benchmark suite
   gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1`.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
   `_helpers.py` (importable, not auto-discovered by pytest). Vision
@@ -49,7 +55,7 @@ Pytest suite for the Talaria CLI and library.
     JSON channel.
   * `talaria hermes log-rotate` — human-readable default for both
     no-action and action runs.
-  * `talaria hermes diagnose` — human-readable default; pass
+  * `talaria hermes doctor` — human-readable default; pass
     `-q/--quiet` to assert on the silent (exit-code-only) path.
   * `talaria hermes benchmark` — human-readable default; pass
     `-q/--quiet` to assert on the silent (exit-code-only) path.
@@ -84,6 +90,16 @@ Pytest suite for the Talaria CLI and library.
   dry-run, profile path resolution, CLI flags.
 - `test_skill_install.py` — recursive skill identifier expansion, install
   policy updates, dry-run behaviour, and CLI flag coverage.
+- `test_skill_index.py` — reader for filesystem walk, lock.json, and
+  `skills.disabled`: profile resolution, missing/invalid file
+  tolerance, and the three drift classes (filesystem-only,
+  lock-only, disabled-orphans) plus the combined case and the
+  empty-profile path.
+- `test_skill_prune.py` — write side of the reconcile: no-op path
+  with no prune flags, dry-run vs apply, the three prune classes
+  (filesystem-only, lock-only, disabled-orphans), backup-on-write
+  behaviour for lock.json + config.yaml, and renderer exit codes
+  (0 for no-op / dry-run, 1 for apply-with-action).
 - `test_sync.py` — sync phases (config, soul, skills, env,
   context_cache), dot-path helpers, profile resolution, run_sync
   orchestration, CLI surface.
@@ -101,14 +117,20 @@ Pytest suite for the Talaria CLI and library.
   protects nothing), dry-run suppression, multi-profile target
   enumeration, run/render shape, `show_resolution` option echo,
   and CLI `--help`.
-- `test_diagnose.py` — 11-detector diagnose feature: per-detector
+- `test_doctor.py` — 12-detector doctor feature: per-detector
   tests (truncation_output, compression_stale_locks, zombie,
-  ghost, rewind, cost_anomalies, etc.), orchestrator selection
-  (`--only`/`--skip`), error isolation, renderer, apply-config-
-  suggestions (dry-run, backup, parent-block creation, type
-  coercion, missing-file creation), config redaction, free-flight
-  pass (zero-log-lines short-circuit, finding parsing, stub runner,
-  unavailable degradation), and CLI subprocess coverage.
+  ghost, rewind, cost_anomalies, skill_index_drift, etc.),
+  orchestrator selection (`--only`/`--skip`), error isolation,
+  renderer, apply-config-suggestions (dry-run, backup,
+  parent-block creation, type coercion, missing-file creation),
+  config redaction, free-flight pass (zero-log-lines
+  short-circuit, finding parsing, stub runner, unavailable
+  degradation), and CLI subprocess coverage. CLI subprocess tests
+  skip `skill_index_drift` via `--skip` because the detector reads
+  `paths.hermes_root` (the operator's live `~/.hermes/`), which is
+  not mocked by the `tmp_path` / `--state-db` / `--log-dir` fixture
+  shape — coverage for the detector lives in `TestSkillIndexDrift`
+  with a hermes-root built under `tmp_path`.
 - `test_benchmark.py` — `talaria hermes benchmark` feature: model
   discovery (dedup, sources, alias provider resolution), state.db
   aggregation (group-by-model, window filtering, reasoning config
@@ -124,7 +146,7 @@ Pytest suite for the Talaria CLI and library.
   `vision=False` opt-out, failure recording, TTL caching, missing
   fixture dir degradation), renderer vision lines, and CLI
   `--no-vision` / `--vision-fixtures-dir` flags.
-- `test_diagnose_aux_models.py` — live-model benchmark suite with
+- `test_doctor_aux_models.py` — live-model benchmark suite with
   **deduplicated discovery**. Walks `model.default`, every
   `model.aliases` entry, and every `auxiliary.<usecase>.model` block
   to build a set of unique `(model, provider)` pairs (50 config

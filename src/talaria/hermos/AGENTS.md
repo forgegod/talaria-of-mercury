@@ -10,13 +10,13 @@ caches.
 
 - Each feature is a single module exposing `run(paths, **opts) -> dict`
   and `render_human(report) -> tuple[int, str]`.
-- `diagnose` is a multi-detector profile anomaly scan. It runs 11
+- `doctor` is a multi-detector profile anomaly scan. It runs 11
   structured detectors against the resolved profile's `state.db` and
   `logs/`, plus a default-on free-flight pass that hands the model
   raw evidence (sessions' message text + log lines + aggregate stats
   + the profile's `config.yaml`) and asks it to find unknown-unknown
   anomalies and config improvements. Surfaced as
-  `talaria hermes diagnose`.
+  `talaria hermes doctor`.
 - `benchmark` is a per-model health/cost/latency/capability report.
   It discovers every unique `(model, provider)` pair from
   `config.yaml`, aggregates recent sessions from `state.db`, enriches
@@ -24,7 +24,7 @@ caches.
   cached JSON smoke call per model when the cache is stale (default
   TTL 30 min). The report is read-only. Surfaced as
   `talaria hermes benchmark`.
-- `diagnose_llm` is the only place the diagnose feature talks to a
+- `doctor_llm` is the only place the doctor feature talks to a
   language model. **Nothing is hardcoded** — the module resolves
   the curator model + provider from the active profile's
   `config.yaml` at runtime via `resolve_curator_config(paths)`.
@@ -33,9 +33,9 @@ caches.
   `model.default` + top-level `provider`. The resolved
   `(model, provider)` pair is passed to `hermes_chat(prompt,
   model=..., provider=..., timeout=...)`. Any model failure /
-  parse error / unavailability degrades to a no-op; the diagnose
+  parse error / unavailability degrades to a no-op; the doctor
   command never breaks because the model failed.
-- `diagnose_free_flight` is the raw-evidence assembler + curator
+- `doctor_free_flight` is the raw-evidence assembler + curator
   prompt for the open-ended pass. It reads and redacts the
   profile's `config.yaml` via `_redact_raw_yaml` (parent blocks
   like `auth`/`credentials`/`secrets` are fully redacted; leaf
@@ -77,6 +77,26 @@ caches.
   `not found`, `not a hub-installed`) in stdout and converts them to a
   non-zero return code. This detection MUST be preserved — without it
   Talaria falsely reports success for skills that were never removed.
+- `skill_index` is profile-scoped and read-only — it exposes the single
+  source of truth for the three places that record installed skills in
+  a profile: the on-disk `<skills_root>/**/SKILL.md` walk (what
+  `hermes skills list` shows), `<skills_root>/.hub/lock.json` (what
+  `hermes skills search` shows), and `skills.disabled` in the profile's
+  `config.yaml`. Both the `doctor` `skill_index_drift` detector and
+  the `skill_prune` tool consume `read_index()` so their drift views
+  agree. Writes are not part of this module — see `skill_prune`.
+- `skill_prune` is profile-scoped by design and the write side of the
+  skill-index reconcile. Three independent `--prune-*` flags select
+  what to fix (filesystem-only orphans, lock-only orphans,
+  `skills.disabled` orphans) and all default to OFF; the bare command
+  is a no-op. `--apply` is required to execute — without it, the tool
+  previews every planned action and exits 0. The default is `--no-backup`
+  / dry-run behaviour; passes are atomic with a `.bak` snapshot for
+  `lock.json` and via `talaria.sync.writer.write_with_backup` for
+  `config.yaml`. Cross-profile prune (e.g. deleting the default
+  `<hermes_root>/skills/` once every default-skill is shadowed by a
+  named profile) is **deferred** — the user agreed to single-profile
+  scope for this iteration. Surfaced as `talaria skills prune`.
 - `serve_stop` is profile-agnostic by design — it detects the Hermes
   dashboard/serve backend by its listening TCP port via
   `psutil.net_connections` → PID, then SIGTERM/poll/SIGKILL. psutil
@@ -147,12 +167,12 @@ caches.
 
 ## Local Contracts
 
-- `diagnose.OUTPUT_TOKEN_ALERT` and `DEFAULT_LOOKBACK_DAYS` are
+- `doctor.OUTPUT_TOKEN_ALERT` and `DEFAULT_LOOKBACK_DAYS` are
   the canonical thresholds. Override per-call via flags, not by mutating
   module attributes.
 - **Log-file discovery is `*.log` + `*.log.*` at the top level of
   the profile's `logs/` directory**, returned by
-  `diagnose.discover_log_files(log_dir)`. The discovery contract
+  `doctor.discover_log_files(log_dir)`. The discovery contract
   is: every active file (`agent.log`, `errors.log`, `tui_gateway_crash.log`,
   `gateway.log`, etc.) AND every rotated copy (`agent.log.1`,
   `agent.log.1.gz`). Non-log files (e.g. `README.md`) are excluded.
@@ -174,7 +194,7 @@ caches.
   non-empty. The `discovered_log_files`
   list is reported alongside the scan for reproducibility; `per_file`
   inside `truncation_log_markers` carries per-file hit counts.
-- `diagnose.run()` accepts a `free_flight: bool` parameter (default
+- `doctor.run()` accepts a `free_flight: bool` parameter (default
   True). When True, the orchestrator appends the open-ended curator
   pass to `per_detector`. Two kinds of free-flight findings are
   emitted: `free_flight:anomaly:<slug>` (fired iff severity is
@@ -184,9 +204,9 @@ caches.
   The curator model is resolved from the profile config via
   `resolve_curator_config(paths)` and invoked as `hermes_chat(prompt,
   model=..., provider=..., timeout=...)`. A model failure /
-  unavailability / parse error degrades to a no-op — the diagnose
+  unavailability / parse error degrades to a no-op — the doctor
   command stays useful offline.
-- `diagnose_free_flight` redacts secrets before passing the evidence
+- `doctor_free_flight` redacts secrets before passing the evidence
   to the model. `_redact_raw_yaml` is a line-oriented scanner:
   parent blocks in `_REDACT_PARENT_KEYS` (`auth`, `credentials`,
   `secrets`, `providers`, `api_keys`, `tokens`) recursively
@@ -200,11 +220,11 @@ caches.
   are a security bug; false positives only erase legitimate
   config (safe). The redacted config is inlined into the prompt;
   the raw config is never handed to the model via `@file:`.
-- `diagnose_free_flight` enforces a token budget (default 100k) by
+- `doctor_free_flight` enforces a token budget (default 100k) by
   trimming sessions tail-first; whole sessions are dropped, never
   partially. A budget of 0 disables the pass entirely (skipped
   detector result).
-- `diagnose.apply_config_suggestions()` reuses the
+- `doctor.apply_config_suggestions()` reuses the
   :func:`talaria.sync.writer.write_with_backup` atomic backup
   writer (the same primitive :mod:`talaria.hermos.auxiliary` and
   :mod:`talaria.hermos.context_cache_fix` use) plus
@@ -218,7 +238,7 @@ caches.
 - The canonical operator-facing detector catalog (id, what it
   checks, threshold, severity, where it queries) is the
   `Detector catalog` table below. The same data is also surfaced
-  via `talaria hermes diagnose --show-resolution` for machines.
+  via `talaria hermes doctor --show-resolution` for machines.
   Keep both in sync when detectors are added or thresholds change.
 
 ### Detector catalog
@@ -227,7 +247,7 @@ caches.
 |-----------------------------|--------------------------------------------------------------------------------|--------------------------------------------------|------------|------------------------------------------|
 | `truncation_output`         | sessions with `output_tokens` above the alert threshold                         | 64 000 (no-rotation; = `OUTPUT_TOKEN_ALERT`)    | alert      | `sessions` table (SQL)                   |
 | `truncation_finish_reason`  | messages with `finish_reason='length'` in the window                             | ≥ 1 hit                                         | alert      | `messages` table (SQL)                   |
-| `truncation_log_markers`     | `WARNING|ERROR|CRITICAL` lines matching a length-class pattern in any `*.log` file | ≥ 1 hit                                         | alert      | log files (uses `diagnose.discover_log_files`) |
+| `truncation_log_markers`     | `WARNING|ERROR|CRITICAL` lines matching a length-class pattern in any `*.log` file | ≥ 1 hit                                         | alert      | log files (uses `doctor.discover_log_files`) |
 | `stream_drops`              | mid-tool-call stream-drop warnings above the alert / borderline rate             | alert: 10 / borderline: 3 per window              | warn / alert | log files                              |
 | `compression_stale_locks`   | `compression_locks` rows whose `expires_at` is in the past                       | ≥ 1 expired lock                                 | alert      | `compression_locks` table (SQL)          |
 | `compression_failures`      | sessions with `compression_failure_error IS NOT NULL` in the window               | ≥ 1 session                                     | alert      | `sessions` table (SQL)                   |
@@ -236,6 +256,7 @@ caches.
 | `cost_anomalies`            | sessions with `cost_status` outside the allowed set, or est/actual divergence    | alert: divergence ≥ 25 % or bad status           | warn / alert | `sessions` table (SQL)                 |
 | `zombie_sessions`            | sessions with `ended_at IS NULL` and `started_at` older than the threshold        | 24 h (`ZOMBIE_THRESHOLD_SECONDS`)                | alert      | `sessions` table (SQL)                   |
 | `ghost_sessions`             | sessions with no `messages` rows in the window                                    | ≥ 1 session                                     | warn       | `sessions` + `messages` join (SQL)       |
+| `skill_index_drift`          | names in filesystem walk but missing from `lock.json` (or vice versa), or in `skills.disabled` referencing nothing | ≥ 1 drift class | alert      | `skill_index.read_index()` (filesystem + lock.json + `config.yaml`) |
 
 All detectors are *confident*: they decide in pure Python with no
 model call. The free-flight curator pass is the only LLM use, and
@@ -426,7 +447,7 @@ its findings (anomaly + config_suggestion) are emitted under the
   `logs/curator/<ts>/` by default, walking the curator tree only when
   `include_curator=True`, and de-duplicating symlinks whose resolved
   target is the same file.
-- `diagnose` tests cover: per-detector unit tests with
+- `doctor` tests cover: per-detector unit tests with
   `make_full_state_db` fixtures (zombies, ghosts, rewinds, cost
   divergences, stale locks, compression failures, handoff errors,
   high-output sessions, length finish_reason), orchestrator with
@@ -434,7 +455,7 @@ its findings (anomaly + config_suggestion) are emitted under the
   `--skip` filtering (incl. unknown-id exit 2), missing state.db
   resilience, renderer for both structured and free-flight groups,
   and CLI subprocess coverage for the full flag set.
-- `diagnose_free_flight` tests cover: config redaction (parent
+- `doctor_free_flight` tests cover: config redaction (parent
   blocks recursively redacted, leaf keys by split-part matching,
   `max_tokens` preserved, comments/blanks preserved), zero-log-lines
   short-circuit, finding parsing (anomaly + config_suggestion
@@ -508,13 +529,13 @@ its findings (anomaly + config_suggestion) are emitted under the
 
 ## Child DOX Index
 
-- `diagnose.py` — multi-detector profile anomaly scan. Runs 11
+- `doctor.py` — multi-detector profile anomaly scan. Runs 11
   structured detectors (truncation_output, truncation_finish_reason,
   truncation_log_markers, stream_drops, compression_stale_locks,
   compression_failures, rewinds, handoff_errors, cost_anomalies,
   zombie_sessions, ghost_sessions) against `state.db` and `logs/`,
   plus a default-on free-flight curator pass. Surfaced as
-  `talaria hermes diagnose`.
+  `talaria hermes doctor`.
 - `benchmark.py` — per-model health/cost/latency/capability report.
   Discovers every unique `(model, provider)` pair from `config.yaml`,
   aggregates recent sessions from `state.db` (call counts, token
@@ -535,14 +556,14 @@ its findings (anomaly + config_suggestion) are emitted under the
   via `ThreadPoolExecutor` (default `DEFAULT_JOBS = 8`; `--jobs N` to
   tune, `--jobs 1` for sequential). Surfaced as
   `talaria hermes benchmark`. Read-only.
-- `diagnose_llm.py` — curator-model subprocess runner. Resolves
+- `doctor_llm.py` — curator-model subprocess runner. Resolves
   the curator model + provider from the profile config at runtime
   via `resolve_curator_config(paths)`, then calls
   `hermes chat -q` via `hermes_chat(prompt, model=..., provider=...,
   timeout=...)`. Degrades to `AdjudicationUnavailable` on any
   failure; the orchestrator catches this and emits a no-op result.
-- `diagnose_free_flight.py` — open-ended curator pass for the
-  `diagnose` command. Reads + redacts the profile's `config.yaml`
+- `doctor_free_flight.py` — open-ended curator pass for the
+  `doctor` command. Reads + redacts the profile's `config.yaml`
   via `_redact_raw_yaml`, inlines it into the prompt, references
   log files + `state.db` via `@folder:` / `@file:` syntax. Resolves
   the curator model + provider from config at runtime (no

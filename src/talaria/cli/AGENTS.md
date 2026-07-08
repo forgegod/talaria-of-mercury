@@ -56,9 +56,9 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 
 - New feature groups: add a module under `talaria/<group>/`, then a subparser
   in `build_parser` that delegates to a `cmd_<group>_<feature>` function.
-- Subcommand names use kebab-case (`diagnose`); Python functions and
-  module names use snake_case (`cmd_hermes_diagnose`,
-  `talaria.hermos.diagnose`).
+- Subcommand names use kebab-case (`doctor`); Python functions and
+  module names use snake_case (`cmd_hermes_doctor`,
+  `talaria.hermos.doctor`).
 - `--json` flag is always present on data-producing subcommands and produces
   a JSON dump via `json.dumps(payload, indent=2, default=str)`.
 - **Silent-by-default contract.** Every `cmd_*` function that produces a
@@ -92,7 +92,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   * `talaria config sync --list` (the `--list` branch inside
     `cmd_sync`) — the operator asked for the dot-path list; that's
     the answer. (Pre-existing behaviour, intentionally not gated.)
-  * `talaria hermes diagnose` (`cmd_hermes_diagnose`) — the
+  * `talaria hermes doctor` (`cmd_hermes_doctor`) — the
     anomaly scan is an inspection the operator invoked to *see
     results*. The default run prints the human report (exit code
     still reflects the verdict); `-q/--quiet` suppresses it for
@@ -112,12 +112,21 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 - Profile-scoped write features (e.g. `talaria hermes fix-context-cache`)
   must expose `--dry-run`, `--no-backup`, `--json`, and `--show-resolution`.
 - `talaria skills` is a top-level command group (sibling to `paths`,
-  `hermes`, `config`) with `install` and `uninstall` subcommands. Both
-  expand a skill identifier (recursive when it ends in `/*`), delegate
-  each install/uninstall to the matching `hermes skills` subcommand, and
-  update the profile's `skills.disabled` policy. A non-wildcard
-  identifier installs or uninstalls a single skill. The recursive
-  behaviour is implicit — there is no separate recursive subcommand.
+  `hermes`, `config`) with `install`, `uninstall`, `create-category`,
+  and `prune` subcommands. The first three expand a skill identifier
+  (recursive when it ends in `/*`), delegate each install/uninstall to
+  the matching `hermes skills` subcommand, and update the profile's
+  `skills.disabled` policy. A non-wildcard identifier installs or
+  uninstalls a single skill. The recursive behaviour is implicit —
+  there is no separate recursive subcommand. `prune` reconciles drift
+  between the on-disk skill walk, `<skills_root>/.hub/lock.json`, and
+  `skills.disabled` — three independent `--prune-*` flags select the
+  drift class to fix (all default to OFF), `--apply` is required to
+  actually delete, and the bare command is a no-op (exit 0).
+  `talaria skills prune` is the write counterpart of the doctor
+  `skill_index_drift` detector; both consume
+  :func:`talaria.hermos.skill_index.read_index` so their drift views
+  agree.
 - `talaria hermes serve-stop` detects and stops the dashboard/serve backend
   by its listening port (profile-agnostic, Linux-only). It takes `--port`,
   `--dry-run`, `--json`, and `--show-resolution`. `--profile` is recorded in
@@ -134,8 +143,8 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   explicit-only: with no prune/rotate flags the file system is never
   touched regardless of `--dry-run`. `--all-profiles` sweeps the
   root `~/.hermes/logs/` plus every `~/.hermes/profiles/*/logs/`.
-- `talaria hermes diagnose` is a multi-detector profile anomaly scan
-  with an opt-in curator-driven config auto-apply. `diagnose` takes
+- `talaria hermes doctor` is a multi-detector profile anomaly scan
+  with an opt-in curator-driven config auto-apply. `doctor` takes
   `--days` (look-back window in days, default 2), `--since`
   (ISO date override), `--include-curator` (walk
   `logs/curator/<ts>/` snapshot trees), `--only` (comma-separated
@@ -146,14 +155,14 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   atomic backup writer — `config.yaml.bak` is written first), and
   `--dry-run` (preview the apply without writing; implies
   `--apply-suggestions` but suppresses the write). The free-flight
-  curator pass is **default-on**: the whole point of `diagnose` is
+  curator pass is **default-on**: the whole point of `doctor` is
   to find inconsistencies the operator didn't anticipate, and the
   deterministic 11-detector pass only covers patterns the rules
   know to look for. Other flags: `--profile`, `--state-db`,
   `--log-dir`, `--json`, `--show-resolution`, `-q/--quiet`,
   `-v/--verbose`. Exit code 0 when all detectors are clean, 1 when
   any fires, 2 when `--only`/`--skip` contain unknown detector ids.
-  Unlike the other inspection features, `diagnose` is
+  Unlike the other inspection features, `doctor` is
   **print-by-default**: the operator ran an anomaly scan to see
   results, so the human report prints unless `-q/--quiet` is passed.
   `-v/--verbose` is a no-op alias kept for convenience.
@@ -175,7 +184,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   speedup; `--jobs 1` restores sequential execution), `--profile`,
   `--state-db`, `--config` (explicit config.yaml path), `--cache`
   (explicit cache file path), `--json`, `--show-resolution`, `-q/--quiet`,
-  `-v/--verbose`. Like `diagnose`, benchmark is print-by-default; `-q`
+  `-v/--verbose`. Like `doctor`, benchmark is print-by-default; `-q`
   suppresses the report.
   Exit code 0 when all smoke tests pass, 1 when any model fails.
 - `talaria completion` delegates to `talaria.cli.completion`, which walks the

@@ -1,9 +1,11 @@
-"""Profile anomaly detector — `talaria hermes diagnose`.
+"""Profile anomaly detector — `talaria hermes doctor`.
 
-Eleven structured detectors run against the resolved profile's
-``state.db`` and ``logs/``. Findings are reported; no writes. The
+Twelve structured detectors run against the resolved profile's
+``state.db``, ``logs/``, and skill registry
+(``<skills_root>/.hub/lock.json`` + ``skills.disabled`` in
+``config.yaml``). Findings are reported; no writes by default. The
 free-flight curator pass (see
-:mod:`talaria.hermos.diagnose_free_flight`) is the only LLM use —
+:mod:`talaria.hermos.doctor_free_flight`) is the only LLM use —
 it analyses the selected log files plus a redacted ``config.yaml``
 with the operator's configured ``_curator`` model and returns both
 ``anomaly`` findings and ``config_suggestion`` findings. The
@@ -56,6 +58,10 @@ catalog table in ``hermos/AGENTS.md``):
   ``started_at`` older than ``ZOMBIE_THRESHOLD_SECONDS``.
 * ``ghost_sessions``        — sessions with no ``messages`` rows in
   the window. Indicates an aborted create.
+* ``skill_index_drift``     — drift between the on-disk skill walk,
+  ``<skills_root>/.hub/lock.json``, and ``skills.disabled`` in
+  ``config.yaml``. Names that exist in only some of the three
+  sources fire the alert; see :mod:`talaria.hermos.skill_index`.
 """
 
 from __future__ import annotations
@@ -73,7 +79,7 @@ from talaria.paths import ResolvedPaths
 
 # ---------------- Log-file discovery + Signal-B scan ----------------
 #
-# Part of ``diagnose``: ``discover_log_files`` and
+# Part of ``doctor``: ``discover_log_files`` and
 # ``scan_log_truncations`` are consumed by the ``truncation_log_markers``
 # and ``stream_drops`` detectors.
 
@@ -272,6 +278,8 @@ HANDOFF_ERRORS = "handoff_errors"
 COST_ANOMALIES = "cost_anomalies"
 ZOMBIE_SESSIONS = "zombie_sessions"
 GHOST_SESSIONS = "ghost_sessions"
+SKILL_INDEX_DRIFT = "skill_index_drift"
+
 
 #: Canonical detector inventory. Order = display order. Every detector
 #: is a confident detector — its verdict is decided in pure Python with
@@ -288,13 +296,14 @@ DETECTOR_IDS: tuple[str, ...] = (
     COST_ANOMALIES,
     ZOMBIE_SESSIONS,
     GHOST_SESSIONS,
+    SKILL_INDEX_DRIFT,
 )
 
 #: Canonical list of every detector id the orchestrator runs.
 #: Every detector is a *confident* detector — its verdict is decided
 #: in pure Python with no model call. The free-flight curator pass is
 #: the only place the model is consulted (see
-#: :mod:`talaria.hermos.diagnose_free_flight`).
+#: :mod:`talaria.hermos.doctor_free_flight`).
 CONFIDENT_DETECTORS: frozenset[str] = frozenset(DETECTOR_IDS)
 
 #: Severity values for ``DetectorResult.severity``.
@@ -799,6 +808,63 @@ def detector_ghost_sessions(con: sqlite3.Connection, since_ts: float) -> Detecto
     )
 
 
+def detector_skill_index_drift(paths: ResolvedPaths) -> DetectorResult:
+    """Drift between the three sources that record installed skills.
+
+    Reads the filesystem walk (what ``hermes skills list`` shows), the
+    lock.json (what ``hermes skills search`` shows), and the
+    ``skills.disabled`` policy in the profile's ``config.yaml``. Any
+    name present in only some of the three is reported. The verdict
+    is read-only; the ``talaria skills prune`` tool consumes the same
+    :class:`SkillIndex` to do the write.
+
+    Detection classes:
+
+    * **filesystem_only** — on disk but not in lock.json. Show in
+      ``skills list``, missing from ``skills search``. Root cause is
+      almost always a filesystem install that bypassed
+      ``hermes skills install`` (``cp -r``, untar, etc.).
+    * **lock_only** — in lock.json but not on disk. The reverse: a
+      manual ``rm -rf`` left the lock entry dangling. ``skills list``
+      silently omits them; ``skills search`` still returns them.
+    * **disabled_orphans** — names in ``skills.disabled`` that exist
+      in neither registry. Harmless but stale; a clean policy file
+      should not reference nothing.
+
+    None of these break runtime behaviour on their own, but each
+    makes the operator's view of "what skills do I have?" disagree
+    with what Hermes actually loads — exactly the silent drift that
+    bites during install/uninstall workflows.
+
+    The detector does **not** check the ``SKILL.md`` ``name:``
+    frontmatter vs the directory basename. That's a different concern
+    (skill content drift) and would warrant a sibling detector if it
+    becomes a recurring false positive.
+    """
+    from talaria.hermos.skill_index import index_to_report, read_index
+
+    idx = read_index(paths)
+    fired = idx.has_drift
+    parts: list[str] = []
+    if idx.filesystem_only:
+        parts.append(f"{len(idx.filesystem_only)} filesystem-only")
+    if idx.lock_only:
+        parts.append(f"{len(idx.lock_only)} lock-only")
+    if idx.disabled_orphans:
+        parts.append(f"{len(idx.disabled_orphans)} disabled-orphans")
+    summary = (
+        "skill index drift: " + ", ".join(parts)
+        if fired else "skill index consistent across filesystem, lock, and disabled policy"
+    )
+    return DetectorResult(
+        id=SKILL_INDEX_DRIFT,
+        severity=SEVERITY_ALERT if fired else SEVERITY_INFO,
+        summary=summary,
+        evidence=index_to_report(idx),
+        fired=fired,
+    )
+
+
 # ---------------- Orchestrator ----------------
 
 #: Callable signature of every detector.
@@ -848,10 +914,10 @@ def run(
     """Run every selected detector against *paths* and assemble a report.
 
     The free-flight curator pass is **default-on**. The whole point
-    of the diagnose command is to find inconsistencies the operator
-    didn't anticipate, and the deterministic 11-detector pass only
+    of the doctor command is to find inconsistencies the operator
+    didn't anticipate, and the deterministic 12-detector pass only
     covers patterns the rules know to look for. A first-time
-    ``talaria hermes diagnose`` therefore calls the configured
+    ``talaria hermes doctor`` therefore calls the configured
     ``_curator`` model on the assembled evidence. Operators who want
     pure deterministic results pass ``--no-free-flight`` at the CLI
     (which sets ``free_flight=False`` here). The token budget and
@@ -880,7 +946,7 @@ def run(
         skip: blacklist of detector ids. Empty = run all.
         free_flight: when True (default), run the open-ended
             curator pass over raw evidence (see
-            :mod:`talaria.hermos.diagnose_free_flight`). Set False
+            :mod:`talaria.hermos.doctor_free_flight`). Set False
             for pure deterministic results.
         free_flight_log_lines: per-file line cap when the hermes
             framework inlines the logs folder in the model
@@ -890,11 +956,11 @@ def run(
             this; operators who want more in-context can raise it.
         free_flight_timeout: per-call subprocess timeout in
             seconds (default 180). One ``hermes chat -q`` call is
-            made per diagnose run; raise this if the curator
+            made per doctor run; raise this if the curator
             model is consistently slow on the operator's network.
         free_flight_runner: override the curator-model subprocess
             runner for tests. ``None`` (default) uses
-            :func:`talaria.hermos.diagnose_llm.hermes_chat`.
+            :func:`talaria.hermos.doctor_llm.hermes_chat`.
         apply_suggestions: when True, write
             ``config_suggestion`` findings to ``config.yaml`` via
             the atomic backup writer.
@@ -932,12 +998,12 @@ def run(
     free_flight_report: dict[str, Any] | None = None
     apply_report: dict[str, Any] | None = None
     if free_flight:
-        from talaria.hermos import diagnose_free_flight, diagnose_llm
+        from talaria.hermos import doctor_free_flight, doctor_llm
         runner = free_flight_runner
         if runner is None:
-            runner = diagnose_llm.hermes_chat
+            runner = doctor_llm.hermes_chat
         try:
-            findings = diagnose_free_flight.run(
+            findings = doctor_free_flight.run(
                 paths,
                 days=days,
                 since=since,
@@ -1252,6 +1318,8 @@ def _dispatch(
         if det_id == TRUNCATION_LOG_MARKERS:
             return detector_truncation_log_markers(paths.log_dir, since_ts, include_curator)
         return detector_stream_drops(paths.log_dir, since_ts, include_curator)
+    if det_id == SKILL_INDEX_DRIFT:
+        return detector_skill_index_drift(paths)
     if con is None:
         return DetectorResult(
             id=det_id, severity=SEVERITY_INFO,
@@ -1286,7 +1354,7 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
     lines: list[str] = []
     fired = bool(report.get("fired"))
 
-    lines.append("Profile diagnose")
+    lines.append("Profile doctor")
     lines.append("=" * 60)
     lines.append("")
     lines.append(f"Profile:  {report['profile']}")

@@ -8,7 +8,7 @@ to (re)generate the PNGs::
 
 The images are checked into the repo so the benchmark does not
 depend on Pillow at test-collection time — only the ground-truth
-metadata (``VISION_FIXTURES`` in ``test_diagnose_aux_models.py``)
+metadata (``VISION_FIXTURES`` in ``test_doctor_aux_models.py``)
 is read.
 """
 
