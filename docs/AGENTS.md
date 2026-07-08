@@ -93,17 +93,4 @@ for the current state of `src/` — they describe **future** work.
 
 ## Child DOX Index
 
-- `MCP-PROXY.md` — SSE MCP reverse-proxy for Hermes profiles. Reads
-  one profile's `mcp_servers:` block, spawns each server as a stdio
-  MCP client, and re-exposes the unioned `tools/list` on a single
-  SSE HTTP endpoint so a thin client profile (e.g. vc-client) can
-  declare one `mcp_servers:` entry instead of seven. The owning
-  folder is `~/.hermes/profiles/hermes-vc/bin/` (a profile artefact,
-  not a Talaria deliverable). Port **8000** (not 9119 — the
-  dashboard keeps 9119). Lifecycle (`start` / `stop` / `status` /
-  `doctor` / `restart`) is governed by a PID file keyed by port,
-  mirroring the ergonomic patterns the operator already runs in
-  `talaria hermes serve-stop` and `hermes-bridge`'s `cli.py`.
-  Reuses `talaria config sync --add-mcp-serve` for the matching
-  vc-client config — see the spec's "Why Talaria does not ship an
-  MCP proxy" subsection for the integration seam.
+- *(empty — no specs in this folder at the moment.)*
