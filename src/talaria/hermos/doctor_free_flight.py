@@ -2,7 +2,7 @@
 
 The free-flight pass assembles a compact evidence bundle (structured
 detector findings + redacted ``config.yaml`` + log-file references +
-``state.db`` reference) and makes a single ``hermes chat -q`` call to
+sliced ``state.db`` metadata) and makes a single ``hermes chat -q`` call to
 the operator's configured ``_curator`` model. The model is asked to
 find anomalies and config improvements the deterministic rules do not
 know to look for.
@@ -14,12 +14,18 @@ Design:
   and every ``auth`` / ``credentials`` / ``secrets`` parent block
   before the text reaches the model. The raw config is never handed
   to the model via ``@file:`` — that would leak API keys and tokens.
-* Log files and ``state.db`` are referenced via hermes'
-  ``@folder:<path>:N`` and ``@file:<path>`` syntax. Log files do not
-  contain credential secrets, and ``state.db`` is a binary SQLite
-  database whose session/message rows carry no API keys. The
-  per-file line cap (``@folder:<log_dir>:N``) bounds the inlined
-  size; the operator can override with ``--free-flight-log-lines=N``.
+* Log files are referenced via hermes' ``@folder:<path>:N`` syntax,
+  which the framework inlines into the model's context. The per-file
+  line cap bounds the inlined size; the operator can override with
+  ``--free-flight-log-lines=N``.
+* ``state.db`` is a binary SQLite database that can be hundreds of
+  megabytes on active profiles. Rather than inlining it via ``@file:``
+  (which saturates memory and causes model timeouts), the database is
+  queried and sliced into compact JSON files written to a temporary
+  directory. The slice file paths are listed in the prompt as plain
+  paths — the model uses its file-read tools to inspect them on
+  demand. The temp directory is kept alive for the full duration of
+  the subprocess call and all result parsing.
 
 Two finding kinds are returned:
 
@@ -37,7 +43,11 @@ the doctor command.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import sqlite3
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from talaria.hermos.doctor import (
@@ -49,6 +59,8 @@ from talaria.hermos.doctor import (
 )
 from talaria.hermos import doctor_llm
 from talaria.paths import ResolvedPaths
+
+logger = logging.getLogger(__name__)
 
 #: Per-file line cap when the framework inlines the logs folder
 #: (``@folder:<log_dir>:N``). The hermes framework inlines the
@@ -63,6 +75,18 @@ DEFAULT_LOG_LINES = 200
 #: upward if the curator model is consistently slow on the
 #: operator's network.
 DEFAULT_TIMEOUT_SECONDS = 180
+
+#: Maximum sessions to include in the sessions slice.
+MAX_SESSIONS_SLICE = 100
+
+#: Maximum message-failure rows to include in the failures slice.
+MAX_FAILURES_SLICE = 50
+
+#: Maximum message-truncation rows to include in the truncations slice.
+MAX_TRUNCATIONS_SLICE = 50
+
+#: Character cap for message content previews in slices.
+CONTENT_PREVIEW_CHARS = 1000
 
 
 #: Prompt template. Single-bracket placeholders are replaced via
@@ -79,9 +103,9 @@ the deterministic rules do not know to look for.
 
 __TASK__
 
-The hermes framework will inline the files referenced below into
-your context. Read them as needed; do not summarise away load-
-bearing detail.
+## Evidence sources
+
+### Inlined into your context (already in the prompt)
 
 * Profile config (redacted — secrets stripped):
 
@@ -89,8 +113,24 @@ bearing detail.
 __CONFIG_YAML__
 ```
 
-* Log files (first __LOG_LINES__ lines per file):  @folder:`__LOGS_PATH__`:__LOG_LINES__
-* state.db (the session/message/cost tables):  @file:`__STATE_DB_PATH__`
+* Log files (first __LOG_LINES__ lines per file, inlined by the framework):
+  @folder:`__LOGS_PATH__`:__LOG_LINES__
+
+### Available via file-read tools (NOT inlined — use your read_file tool)
+
+The following JSON files contain sliced metadata from the profile's
+``state.db``. They are plain text JSON — use your file-read tool to
+open any of them when you need to inspect the data. Do NOT guess
+their contents; read them first.
+
+* Sessions metadata (last __MAX_SESSIONS__ sessions in the window):
+  __SESSIONS_JSON_PATH__
+* Active compression locks:
+  __COMPRESSION_LOCKS_JSON_PATH__
+* Recent high-signal failures & errors (last __MAX_FAILURES__ rows):
+  __MESSAGES_FAILURES_JSON_PATH__
+* Recent message truncations (last __MAX_TRUNCATIONS__ rows):
+  __MESSAGES_TRUNCATIONS_JSON_PATH__
 
 Structured detector findings (already fired):
 
@@ -317,26 +357,38 @@ def _build_prompt(
     *,
     config_yaml_redacted: str,
     logs_path: str,
-    state_db_path: str,
     log_lines: int,
     findings_payload: str,
+    sessions_json_path: str,
+    compression_locks_json_path: str,
+    messages_failures_json_path: str,
+    messages_truncations_json_path: str,
 ) -> str:
     """Assemble the model prompt.
 
-    The prompt is task description + structured findings + inline
-    redacted config + file references for logs and state.db. The
-    hermes framework reads the referenced files and inlines them
-    into the model's context; the prompt itself never contains
-    file contents except for the redacted config.
+    The prompt has two evidence sections:
+
+    * **Inlined** — redacted config.yaml and log files (via
+      ``@folder:``). These are injected into the model's context
+      by the hermes framework before generation.
+    * **Tool-readable** — JSON slice file paths. These are NOT
+      inlined; the model uses its file-read tools to open them
+      on demand during generation.
     """
     return (
         PROMPT_TEMPLATE
         .replace("__TASK__", _TASK_DESCRIPTION)
         .replace("__CONFIG_YAML__", config_yaml_redacted)
         .replace("__LOGS_PATH__", logs_path)
-        .replace("__STATE_DB_PATH__", state_db_path)
         .replace("__LOG_LINES__", str(log_lines))
         .replace("__FINDINGS__", findings_payload)
+        .replace("__SESSIONS_JSON_PATH__", sessions_json_path)
+        .replace("__COMPRESSION_LOCKS_JSON_PATH__", compression_locks_json_path)
+        .replace("__MESSAGES_FAILURES_JSON_PATH__", messages_failures_json_path)
+        .replace("__MESSAGES_TRUNCATIONS_JSON_PATH__", messages_truncations_json_path)
+        .replace("__MAX_SESSIONS__", str(MAX_SESSIONS_SLICE))
+        .replace("__MAX_FAILURES__", str(MAX_FAILURES_SLICE))
+        .replace("__MAX_TRUNCATIONS__", str(MAX_TRUNCATIONS_SLICE))
         .replace("__SCHEMA__", json.dumps(_RESPONSE_SCHEMA, indent=2))
     )
 
@@ -438,7 +490,7 @@ def _finding_to_result(idx: int, finding: dict[str, Any]) -> DetectorResult:
 def _findings_for_prompt(paths: ResolvedPaths) -> list[dict[str, Any]]:
     """Build a compact per_detector list for the model prompt.
 
-    Runs the 11 deterministic detectors via the orchestrator
+    Runs the 12 deterministic detectors via the orchestrator
     (with free_flight=False to avoid recursion) and returns a
     pruned list suitable for inline inclusion in the model
     prompt.
@@ -461,6 +513,152 @@ def _findings_for_prompt(paths: ResolvedPaths) -> list[dict[str, Any]]:
             "evidence": pruned,
         })
     return out
+
+
+# ---------------- Database slice extraction ----------------
+
+def _dump_database_slices(
+    paths: ResolvedPaths,
+    temp_dir: Path,
+    *,
+    since_ts: float,
+) -> dict[str, Path]:
+    """Query state.db and write compact slices to JSON files under *temp_dir*.
+
+    Each slice is a JSON array of row dicts. If the database is
+    missing, corrupt, or a table does not exist, the corresponding
+    slice file is written as an empty array ``[]`` and a warning is
+    logged — the model gets a clear "no data" signal rather than a
+    silent gap.
+
+    Parameters:
+        paths: resolved profile paths (``paths.state_db`` is the DB).
+        temp_dir: directory to write slice files into.
+        since_ts: unix timestamp; sessions older than this are
+            excluded from the sessions slice.
+
+    Returns:
+        Mapping of slice key to resolved file path.
+    """
+    slices: dict[str, Path] = {}
+    data: dict[str, list[dict[str, Any]]] = {
+        "sessions": [],
+        "compression_locks": [],
+        "messages_failures": [],
+        "messages_truncations": [],
+    }
+
+    # Ensure the output directory exists — callers may pass a
+    # path that doesn't yet (tempfile.TemporaryDirectory does,
+    # but tests and direct callers may not).
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = paths.state_db
+    if db_path.exists():
+        con: sqlite3.Connection | None = None
+        try:
+            uri = f"file:{db_path}?mode=ro"
+            con = sqlite3.connect(uri, uri=True)
+            con.row_factory = sqlite3.Row
+
+            # 1. Sessions metadata slice (most recent, within window)
+            try:
+                rows = con.execute(
+                    """
+                    SELECT id, model, started_at, ended_at, end_reason,
+                           message_count, tool_call_count, input_tokens, output_tokens,
+                           estimated_cost_usd, actual_cost_usd, rewind_count,
+                           handoff_state, handoff_error
+                    FROM sessions
+                    WHERE started_at >= ?
+                    ORDER BY started_at DESC
+                    LIMIT ?;
+                    """,
+                    (since_ts, MAX_SESSIONS_SLICE),
+                ).fetchall()
+                data["sessions"] = [{k: r[k] for k in r.keys()} for r in rows]
+            except sqlite3.DatabaseError as exc:
+                logger.warning("sessions slice query failed: %s", exc)
+
+            # 2. Compression locks slice (all active locks)
+            try:
+                rows = con.execute(
+                    "SELECT session_id, holder, acquired_at, expires_at "
+                    "FROM compression_locks;",
+                ).fetchall()
+                data["compression_locks"] = [
+                    {k: r[k] for k in r.keys()} for r in rows
+                ]
+            except sqlite3.DatabaseError as exc:
+                logger.warning("compression_locks slice query failed: %s", exc)
+
+            # 3. Recent message failures & errors
+            try:
+                rows = con.execute(
+                    """
+                    SELECT id, session_id, role, tool_name, finish_reason, timestamp,
+                           SUBSTR(content, 1, ?) AS content_preview
+                    FROM messages
+                    WHERE timestamp >= ?
+                      AND (content LIKE '%error%'
+                       OR content LIKE '%exception%'
+                       OR content LIKE '%failed%'
+                       OR content LIKE '%timeout%')
+                      AND role IN ('tool', 'assistant', 'user')
+                    ORDER BY timestamp DESC
+                    LIMIT ?;
+                    """,
+                    (CONTENT_PREVIEW_CHARS, since_ts, MAX_FAILURES_SLICE),
+                ).fetchall()
+                data["messages_failures"] = [
+                    {k: r[k] for k in r.keys()} for r in rows
+                ]
+            except sqlite3.DatabaseError as exc:
+                logger.warning("messages_failures slice query failed: %s", exc)
+
+            # 4. Message truncation events
+            try:
+                rows = con.execute(
+                    """
+                    SELECT id, session_id, role, finish_reason, timestamp,
+                           SUBSTR(content, 1, ?) AS content_preview
+                    FROM messages
+                    WHERE timestamp >= ?
+                      AND finish_reason = 'length'
+                    ORDER BY timestamp DESC
+                    LIMIT ?;
+                    """,
+                    (CONTENT_PREVIEW_CHARS, since_ts, MAX_TRUNCATIONS_SLICE),
+                ).fetchall()
+                data["messages_truncations"] = [
+                    {k: r[k] for k in r.keys()} for r in rows
+                ]
+            except sqlite3.DatabaseError as exc:
+                logger.warning("messages_truncations slice query failed: %s", exc)
+
+        except sqlite3.DatabaseError as exc:
+            logger.warning("state.db open failed: %s", exc)
+        finally:
+            if con is not None:
+                con.close()
+
+    for name, rows in [
+        ("sessions.json", data["sessions"]),
+        ("compression_locks.json", data["compression_locks"]),
+        ("messages_failures.json", data["messages_failures"]),
+        ("messages_truncations.json", data["messages_truncations"]),
+    ]:
+        path = temp_dir / name
+        try:
+            path.write_text(
+                json.dumps(rows, default=str, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.warning("slice write failed for %s: %s", name, exc)
+        slices[name.replace(".json", "")] = path
+
+    return slices
 
 
 # ---------------- Public entry point ----------------
@@ -514,11 +712,10 @@ def run(
             provider = cfg_provider
 
     config_path = _resolve_config_path(paths)
-    state_db_path = paths.state_db
     log_files = _discover_log_files(paths, include_curator)
 
     # Read and redact the profile's config.yaml. A missing config
-    # is tolerated — the model still gets the log + state.db
+    # is tolerated — the model still gets the log + slice
     # references. When present, the raw text is never handed to the
     # model; _redact_raw_yaml strips every secret-bearing key and
     # every auth/credentials/secrets parent block first.
@@ -538,44 +735,64 @@ def run(
         )]
 
     findings_payload = json.dumps(_findings_for_prompt(paths), default=str, indent=2)
-    prompt = _build_prompt(
-        config_yaml_redacted=config_yaml_redacted,
-        logs_path=str(paths.log_dir),
-        state_db_path=str(state_db_path),
-        log_lines=log_lines,
-        findings_payload=findings_payload,
-    )
 
-    try:
-        rc, stdout, stderr = subprocess_runner(
-            prompt, model=model, provider=provider, timeout=timeout,
+    window = resolve_window(days=days, since=since)
+
+    # The temp directory must survive the entire subprocess call
+    # AND all result parsing. The model reads slice files via
+    # tool calls during generation; if the directory is cleaned
+    # up before the subprocess returns, the files vanish and the
+    # model gets I/O errors. We keep the with-block open through
+    # the return so the files exist for the full duration.
+    with tempfile.TemporaryDirectory(prefix="talaria_free_flight_") as tmpdir:
+        tmp_path = Path(tmpdir)
+        slices = _dump_database_slices(paths, tmp_path, since_ts=window.since_ts)
+
+        prompt = _build_prompt(
+            config_yaml_redacted=config_yaml_redacted,
+            logs_path=str(paths.log_dir),
+            log_lines=log_lines,
+            findings_payload=findings_payload,
+            sessions_json_path=str(slices["sessions"]),
+            compression_locks_json_path=str(slices["compression_locks"]),
+            messages_failures_json_path=str(slices["messages_failures"]),
+            messages_truncations_json_path=str(slices["messages_truncations"]),
         )
-    except doctor_llm.AdjudicationUnavailable as exc:
-        return [DetectorResult(
-            id="free_flight:unavailable",
-            severity=SEVERITY_INFO,
-            summary=f"curator model unavailable: {exc}",
-        )]
-    except Exception as exc:
-        return [DetectorResult(
-            id="free_flight:error",
-            severity=SEVERITY_INFO,
-            summary=f"subprocess failed: {type(exc).__name__}: {exc}",
-        )]
 
-    if rc != 0 and not stdout.strip():
-        return [DetectorResult(
-            id="free_flight:error",
-            severity=SEVERITY_INFO,
-            summary=f"hermes chat -q exited {rc}: {stderr.strip()[:200]}",
-        )]
+        try:
+            rc, stdout, stderr = subprocess_runner(
+                prompt, model=model, provider=provider, timeout=timeout,
+            )
+        except doctor_llm.AdjudicationUnavailable as exc:
+            return [DetectorResult(
+                id="free_flight:unavailable",
+                severity=SEVERITY_INFO,
+                summary=f"curator model unavailable: {exc}",
+            )]
+        except Exception as exc:
+            return [DetectorResult(
+                id="free_flight:error",
+                severity=SEVERITY_INFO,
+                summary=f"subprocess failed: {type(exc).__name__}: {exc}",
+            )]
 
-    findings = _parse_findings(stdout)
-    if not findings and "findings" not in (stdout or ""):
-        return [DetectorResult(
-            id="free_flight:unparseable",
-            severity=SEVERITY_INFO,
-            summary="curator model response could not be parsed as a findings list",
-            evidence={"raw": stdout[:2000]},
-        )]
-    return [_finding_to_result(i, f) for i, f in enumerate(findings)]
+        # Parse findings while the temp directory is still alive.
+        # The model's response may reference file paths for
+        # evidence; keeping the directory ensures any downstream
+        # inspection of the model's output can resolve them.
+        if rc != 0 and not stdout.strip():
+            return [DetectorResult(
+                id="free_flight:error",
+                severity=SEVERITY_INFO,
+                summary=f"hermes chat -q exited {rc}: {stderr.strip()[:200]}",
+            )]
+
+        findings = _parse_findings(stdout)
+        if not findings and "findings" not in (stdout or ""):
+            return [DetectorResult(
+                id="free_flight:unparseable",
+                severity=SEVERITY_INFO,
+                summary="curator model response could not be parsed as a findings list",
+                evidence={"raw": stdout[:2000]},
+            )]
+        return [_finding_to_result(i, f) for i, f in enumerate(findings)]

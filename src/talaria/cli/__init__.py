@@ -93,12 +93,31 @@ def cmd_hermes_doctor(args: argparse.Namespace) -> int:
             only=only,
             skip=skip,
             free_flight=not args.no_free_flight,
-            apply_suggestions=args.apply_suggestions,
+            apply_curator_suggestions=args.apply_curator_suggestions,
             apply_dry_run=args.dry_run,
         )
     except ValueError as exc:
         print(f"talaria hermes doctor: {exc}", file=sys.stderr)
         return 2
+    # Tactical actions run after detection so the report's per_detector
+    # verdict still reflects the scan state (post-tactical-action re-scan
+    # is not the contract). The three preview/apply flags are
+    # independent of each other and of --apply-curator-suggestions.
+    tactical_flags = (
+        args.prune_stale_locks
+        or args.close_zombies
+        or args.prune_ghost_sessions
+    )
+    if tactical_flags:
+        report["tactical_actions"] = doctor.apply_tactical_actions(
+            paths,
+            prune_stale_locks=args.prune_stale_locks,
+            close_zombies=args.close_zombies,
+            prune_ghost_sessions=args.prune_ghost_sessions,
+            apply=args.apply,
+            days=args.days,
+            since=args.since,
+        )
     if args.json:
         _print_json(report)
         return 1 if report["fired"] else 0
@@ -676,8 +695,10 @@ def build_parser() -> argparse.ArgumentParser:
             "runs by default — it is the only way the structured 12-detector "
             "pass catches unknown-unknown anomalies and config improvements. "
             "Pass --no-free-flight for pure deterministic results. "
-            "config_suggestion findings from the free-flight pass are "
-            "reported but never applied unless --apply-suggestions is passed."
+            "Findings come in two kinds: anomaly (reported in the verdict; "
+            "no tactical action is available) and config_suggestion "
+            "(curator-model recommendations; reported but never applied "
+            "unless --apply-curator-suggestions is passed)."
         ),
     )
     p_diag.add_argument(
@@ -713,22 +734,62 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_diag.add_argument(
-        "--apply-suggestions", action="store_true",
+        "--apply-curator-suggestions", action="store_true",
         help=(
             "Apply config_suggestion findings from the free-flight "
-            "pass to the active profile's config.yaml. Atomic backup "
-            "(config.yaml.bak) is written first; the change is reported "
-            "in the apply.* fields of the JSON report. Off by default; "
-            "the operator reviews suggestions on a dry-run first."
+            "curator pass to the active profile's config.yaml. Atomic "
+            "backup (config.yaml.bak) is written first; the change is "
+            "reported in the apply.* fields of the JSON report. Off by "
+            "default; the operator reviews suggestions on a dry-run first. "
+            "Note: only findings of kind config_suggestion are applied; "
+            "anomaly findings are diagnostic and have no tactical action."
         ),
     )
     p_diag.add_argument(
         "--dry-run", action="store_true",
         help=(
             "Preview the apply path without writing bytes. Implies "
-            "--apply-suggestions (so the diff is computed) but the "
-            "write step is suppressed. The proposed diff is reported "
+            "--apply-curator-suggestions (so the diff is computed) but "
+            "the write step is suppressed. The proposed diff is reported "
             "in apply.dry_run_diff."
+        ),
+    )
+    p_diag.add_argument(
+        "--prune-stale-locks", action="store_true",
+        help=(
+            "Stale-lock tactical action: drop every row in "
+            "compression_locks whose expires_at is in the past. "
+            "Dry-run preview by default — pass --apply to actually "
+            "write to state.db via SQLite WAL."
+        ),
+    )
+    p_diag.add_argument(
+        "--close-zombies", action="store_true",
+        help=(
+            "Zombie-closure tactical action: set ended_at on every "
+            "session whose writer crashed without closing. Session "
+            "rows are preserved (only ended_at is written). "
+            "Dry-run preview by default — pass --apply to actually write."
+        ),
+    )
+    p_diag.add_argument(
+        "--prune-ghost-sessions", action="store_true",
+        help=(
+            "Ghost-session tactical action: delete every session "
+            "within the look-back window that has zero rows in "
+            "messages. Out-of-window ghosts are diagnostic-only and "
+            "never auto-deleted. Dry-run preview by default — pass "
+            "--apply to actually write."
+        ),
+    )
+    p_diag.add_argument(
+        "--apply", action="store_true",
+        help=(
+            "Gate the tactical write paths. When set, the three "
+            "--prune-* / --close-* flags become writes instead of "
+            "dry-run previews. A no-op when none of those flags is "
+            "set. Independent from --apply-curator-suggestions, which "
+            "writes curator config_suggestion findings."
         ),
     )
     p_diag.add_argument(

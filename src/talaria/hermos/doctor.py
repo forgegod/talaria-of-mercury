@@ -9,21 +9,40 @@ free-flight curator pass (see
 it analyses the selected log files plus a redacted ``config.yaml``
 with the operator's configured ``_curator`` model and returns both
 ``anomaly`` findings and ``config_suggestion`` findings. The
-``--apply-suggestions`` flag (with ``--dry-run`` to preview) writes
-the suggestions to ``config.yaml`` via the same atomic backup
-writer used by :mod:`talaria.hermos.auxiliary`.
+``--apply-curator-suggestions`` flag (with ``--dry-run`` to preview)
+writes the curator's config_suggestion findings to ``config.yaml``
+via the same atomic backup writer used by :mod:`talaria.hermos.auxiliary``.
+
+Findings come in two kinds and only one is actionable through this CLI:
+
+* ``anomaly`` (deterministic detectors + free-flight) — diagnostic
+  evidence about the profile. There is **no tactical action** for an
+  anomaly finding; it is reported and the operator decides what to do.
+  ``--apply-curator-suggestions`` does NOT act on anomalies.
+* ``config_suggestion`` (free-flight only) — a curator-model
+  recommendation carrying a ``yaml_path`` + ``suggested_value``. These
+  are the only findings ``--apply-curator-suggestions`` writes; the
+  apply path filters the findings list to ``id.startswith("free_flight:config:")``
+  and ignores everything else.
+
+A second opt-in remediation path covers three deterministic findings
+that have an unambiguous local fix: ``--prune-stale-locks``,
+``--close-zombies``, and ``--prune-ghost-sessions``. Each defaults
+to dry-run preview; the shared ``--apply`` flag is the gate that
+turns preview into write. See :func:`apply_tactical_actions` for
+the per-class contracts.
 
 The contract:
 
 * Read-only access to ``state.db``, the profile's ``logs/``, and (for
   the free-flight pass) ``config.yaml``. No writes without
-  ``--apply-suggestions``.
+  ``--apply-curator-suggestions``.
 * Each detector is a pure function returning a
   :class:`DetectorResult`.
 * The orchestrator runs every detector, runs the free-flight pass
   (default on; ``--no-free-flight`` to opt out), and applies
-  ``config_suggestion`` findings when ``--apply-suggestions`` is
-  passed. A ``--dry-run`` previews the apply without writing.
+  ``config_suggestion`` findings when ``--apply-curator-suggestions``
+  is passed. A ``--dry-run`` previews the apply without writing.
 * The exit code is 1 if any deterministic detector or free-flight
   ``anomaly`` finding fires; 0 if everything is clean. (A
   ``config_suggestion`` finding never fires; the operator decides
@@ -907,7 +926,7 @@ def run(
     free_flight_log_lines: int = 200,
     free_flight_timeout: int = 180,
     free_flight_runner: Callable[..., Any] | None = None,
-    apply_suggestions: bool = False,
+    apply_curator_suggestions: bool = False,
     apply_dry_run: bool = False,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -926,16 +945,25 @@ def run(
 
     ``config_suggestion`` findings returned by the free-flight pass
     are reported in the verdict but never applied unless
-    ``apply_suggestions=True`` is passed. With ``apply_suggestions``,
-    the active profile's ``config.yaml`` is written via
-    :func:`talaria.sync.writer.write_with_backup` (the same atomic
-    backup writer used by :mod:`talaria.hermos.auxiliary`). With
-    ``apply_dry_run=True`` the proposed change is computed and
-    reported but no bytes are written. The two flags are
-    independent: ``apply_suggestions=False`` skips the apply path
-    entirely (the default report-only mode); ``apply_dry_run=True``
-    previews the apply without writing. Both can be set; the
-    dry-run wins.
+    ``apply_curator_suggestions=True`` is passed. With
+    ``apply_curator_suggestions``, the active profile's ``config.yaml``
+    is written via :func:`talaria.sync.writer.write_with_backup`
+    (the same atomic backup writer used by
+    :mod:`talaria.hermos.auxiliary`). With ``apply_dry_run=True`` the
+    proposed change is computed and reported but no bytes are
+    written. The two flags are independent:
+    ``apply_curator_suggestions=False`` skips the apply path entirely
+    (the default report-only mode); ``apply_dry_run=True`` previews
+    the apply without writing. Both can be set; the dry-run wins.
+
+    Note on what the apply path actually does: it filters the
+    findings list to ``id.startswith("free_flight:config:")`` and
+    writes only those to ``config.yaml``. Anomaly findings
+    (deterministic detectors + free-flight ``kind=anomaly``) are
+    diagnostic; they do not have a tactical action and are
+    intentionally NOT applied. The flag name
+    ``--apply-curator-suggestions`` reflects this — only curator
+    suggestions are applied.
 
     Parameters:
         paths: the resolved profile (state.db, log_dir).
@@ -961,11 +989,12 @@ def run(
         free_flight_runner: override the curator-model subprocess
             runner for tests. ``None`` (default) uses
             :func:`talaria.hermos.doctor_llm.hermes_chat`.
-        apply_suggestions: when True, write
-            ``config_suggestion`` findings to ``config.yaml`` via
-            the atomic backup writer.
+        apply_curator_suggestions: when True, write curator
+            ``config_suggestion`` findings to ``config.yaml`` via the
+            atomic backup writer. Anomaly findings are NOT applied —
+            they are diagnostic and have no tactical action.
         apply_dry_run: when True, preview the apply without writing.
-            Forces ``apply_suggestions=True`` to compute the
+            Forces ``apply_curator_suggestions=True`` to compute the
             preview; the write is still suppressed.
         config_path: explicit path to ``config.yaml`` (overrides
             the resolved-profile path). Useful for tests.
@@ -1028,9 +1057,13 @@ def run(
             "timeout_seconds": free_flight_timeout,
         }
         # Auto-apply config_suggestion findings when the operator
-        # opted in. The two flags are independent: apply_suggestions
+        # opted in. The two flags are independent: apply_curator_suggestions
         # is the gate, apply_dry_run forces the preview path.
-        if apply_suggestions or apply_dry_run:
+        # The apply path is curator-only: it filters findings to
+        # id.startswith("free_flight:config:") and ignores anomaly
+        # findings (deterministic detectors + free-flight anomalies),
+        # because those have no tactical action.
+        if apply_curator_suggestions or apply_dry_run:
             config_suggestions = [
                 r for r in findings
                 if r.id.startswith("free_flight:config:")
@@ -1050,7 +1083,9 @@ def run(
         "window_start_utc": window.cutoff_iso,
         "selected_detectors": list(selected),
         "skipped_detectors": skipped,
-        "per_detector": [r.to_dict() for r in per_detector],
+        "per_detector": [
+            _with_remediation_hint(r.to_dict()) for r in per_detector
+        ],
         "detector_errors": detector_errors,
         "free_flight": free_flight_report,
         "apply": apply_report,
@@ -1305,6 +1340,518 @@ def apply_config_suggestions(
     return report
 
 
+# ---------------- Tactical actions (deterministic remediation) ----------------
+#
+# Most doctor findings are diagnostic — they have no local fix and the
+# operator decides what to do. Three detectors have actionable remediation
+# where a destructive write is genuinely the right thing:
+#
+#   * ``compression_stale_locks``  — drop expired rows in ``compression_locks``
+#     that are blocking the next compressor run.
+#   * ``zombie_sessions``           — close sessions whose writer crashed
+#     without setting ``ended_at``. They inflate session counts and any
+#     "currently running" reporting.
+#   * ``ghost_sessions``            — delete sessions that were created but
+#     never received a single message row. They are dead weight that
+#     pollutes cost and message-count aggregates.
+#
+# The other nine findings stay diagnostic. Truncation, stream drops,
+# compression failures, rewinds, handoff errors, cost anomalies, and
+# skill_index_drift each need human context to fix correctly — auto-applying
+# any of them would create the exact "baroque defensive machinery" we
+# avoid.
+#
+# Flag model: each tactical flag defaults to dry-run preview. ``--apply``
+# is the gate that turns preview into a write. The defaults match
+# ``talaria skills prune`` — preview by default, explicit apply required.
+
+#: Identifier for the stale-lock tactical action (used in CLI + report).
+TACTICAL_PRUNE_STALE_LOCKS = "prune_stale_locks"
+
+#: Identifier for the zombie-closure tactical action.
+TACTICAL_CLOSE_ZOMBIES = "close_zombies"
+
+#: Identifier for the ghost-session tactical action.
+TACTICAL_PRUNE_GHOST_SESSIONS = "prune_ghost_sessions"
+
+#: Canonical ordered tuple of tactical-action identifiers. Each maps to
+#: one detector id and one per-action helper. The orchestrator walks
+#: this tuple in order so the report keys have a stable shape.
+TACTICAL_ACTION_IDS: tuple[str, ...] = (
+    TACTICAL_PRUNE_STALE_LOCKS,
+    TACTICAL_CLOSE_ZOMBIES,
+    TACTICAL_PRUNE_GHOST_SESSIONS,
+)
+
+
+#: Mapping from detector id → the CLI invocation the operator can
+#: paste to fix that detector's findings. The renderer prints the
+#: hint after the detector's "first flagged …" line so the operator
+#: sees both the evidence and the remediation in one glance. The
+#: same hint lands in the JSON report's
+#: ``per_detector[i].remediation`` field for machines.
+#:
+#: Hint text is the exact argv shape — no markdown, no surrounding
+#: prose, no leading "fix:" prefix (the renderer adds that). When the
+#: detector has no remediation, omit the id from this map; the
+#: renderer will not emit a hint line.
+#:
+#: Two flavours of hint exist:
+#:
+#: * Doctor tactical flags — ``--prune-stale-locks [--apply]`` and
+#:   friends. Same command, opt-in write.
+#: * Sibling-command remediations — e.g. ``talaria skills prune …``.
+#:   The remediation lives in a different command (different
+#:   process, different config backup contract, different safety
+#:   model); the renderer cannot preview them inline, so the
+#:   operator runs the sibling in dry-run first. The hint text
+#:   always starts with the command name so the operator cannot
+#:   mistake it for a doctor flag.
+#:
+#: Keep in sync with the tactical-action layer. Adding a new
+#: detector+action pair is one line here plus one entry in
+#: ``TACTICAL_ACTION_IDS``.
+_DETECTOR_REMEDIATION_HINTS: dict[str, str] = {
+    COMPRESSION_STALE_LOCKS:
+        "--prune-stale-locks [--apply]",
+    ZOMBIE_SESSIONS:
+        "--close-zombies [--apply]",
+    GHOST_SESSIONS:
+        "--prune-ghost-sessions [--apply]",
+    SKILL_INDEX_DRIFT:
+        "talaria skills prune --prune-filesystem-only "
+        "--prune-lock-only --prune-disabled-orphans --apply",
+}
+
+
+def _with_remediation_hint(detector_dict: dict[str, Any]) -> dict[str, Any]:
+    """Attach a CLI remediation hint to a detector's serialised form.
+
+    The orchestrator emits one ``per_detector`` entry per detector;
+    this helper looks the detector's id up in
+    :data:`_DETECTOR_REMEDIATION_HINTS` and attaches the matching
+    flag shape as a ``remediation`` key. The renderer reads it to
+    print ``fix: <hint>`` under fired findings; JSON consumers see
+    it as a top-level field on the per-detector dict.
+
+    Free-flight findings (``free_flight:anomaly:<slug>``,
+    ``free_flight:config:<slug>``) are deliberately NOT enriched —
+    config_suggestions are not actionable through tactical flags,
+    and free-flight anomalies are open-ended by design (the model
+    decides the remediation). Adding ``remediation`` to those would
+    create the misleading impression that the deterministic
+    tactical layer applies to them.
+
+    The input dict is shallow-copied to keep this function pure; the
+    orchestrator never re-reads the original ``DetectorResult``.
+    """
+    out = dict(detector_dict)
+    out["remediation"] = _DETECTOR_REMEDIATION_HINTS.get(detector_dict["id"])
+    return out
+
+
+def _open_state_db_readwrite(path: Path) -> sqlite3.Connection | None:
+    """Open *path* read-write. Returns ``None`` if it does not exist.
+
+    Distinct from :func:`_open_state_db_readonly` which uses ``mode=ro``
+    URI; that connection cannot be used for writes. Tactical actions
+    need RW access. A read-only mount or insufficient permission will
+    raise ``sqlite3.OperationalError``; we let the caller report it
+    rather than silently degrading to a no-op.
+    """
+    if not path.exists():
+        return None
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _tactical_action_report(
+    *,
+    dry_run: bool,
+    would_modify: list[dict[str, Any]],
+    applied: list[dict[str, Any]],
+    skipped: list[dict[str, Any]] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Build the standard per-action report dict.
+
+    Matches the shape of :func:`apply_config_suggestions` so JSON
+    consumers can branch on ``ok`` / ``dry_run`` / ``applied`` /
+    ``skipped`` uniformly across all doctor apply paths.
+    """
+    return {
+        "ok": error is None,
+        "dry_run": dry_run,
+        "would_modify": would_modify,
+        "applied": applied,
+        "skipped": skipped or [],
+        "error": error,
+    }
+
+
+def _prune_stale_locks_action(
+    paths: ResolvedPaths,
+    *,
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Tactical action for ``compression_stale_locks``.
+
+    Deletes every row in ``compression_locks`` whose ``expires_at`` is
+    in the past. The preview identifies each row by ``(session_id,
+    holder, expires_at)`` so the operator can audit what would be
+    removed. Identifies which session ids will be affected.
+    """
+    if not paths.state_db.exists():
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        con = _open_state_db_readwrite(paths.state_db)
+    except sqlite3.OperationalError as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not writable: {exc}",
+        )
+    if con is None:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        rows = con.execute(
+            """
+            SELECT session_id, holder, acquired_at, expires_at,
+                   (expires_at - ?) AS seconds_remaining
+            FROM compression_locks
+            WHERE expires_at < ?
+            ORDER BY expires_at ASC
+            """,
+            (now_ts, now_ts),
+        ).fetchall()
+        would_modify = _rows_to_dicts(rows)
+        applied: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        if not dry_run and would_modify:
+            for r in would_modify:
+                # ``session_id`` is the PRIMARY KEY of
+                # ``compression_locks`` (one lock per session), so the
+                # delete is keyed on session_id alone. holder /
+                # expires_at are kept in the report for audit; we
+                # still re-assert expires_at < now_ts at delete time
+                # so a row whose expires_at got extended between scan
+                # and write is preserved.
+                cur = con.execute(
+                    """
+                    DELETE FROM compression_locks
+                    WHERE session_id = ?
+                      AND expires_at < ?
+                    """,
+                    (r["session_id"], now_ts),
+                )
+                if cur.rowcount > 0:
+                    applied.append({
+                        "session_id": r["session_id"],
+                        "holder": r["holder"],
+                        "expires_at": r["expires_at"],
+                    })
+                else:
+                    skipped.append({
+                        "session_id": r["session_id"],
+                        "reason": "row gone or expires_at was extended (concurrent writer?)",
+                    })
+            con.commit()
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=would_modify,
+            applied=applied,
+            skipped=skipped,
+        )
+    except sqlite3.Error as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"sqlite error: {exc}",
+        )
+    finally:
+        con.close()
+
+
+def _close_zombies_action(
+    paths: ResolvedPaths,
+    *,
+    dry_run: bool,
+    threshold_seconds: int = ZOMBIE_THRESHOLD_SECONDS,
+) -> dict[str, Any]:
+    """Tactical action for ``zombie_sessions``.
+
+    Sets ``ended_at = now`` on every session whose ``started_at`` is
+    older than ``threshold_seconds`` and whose ``ended_at IS NULL``.
+    The session row itself stays — closing it preserves the audit
+    trail of what crashed. Only ``ended_at`` is written.
+
+    The preview lists each session id + age so the operator can
+    audit which ones would be closed.
+    """
+    if not paths.state_db.exists():
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        con = _open_state_db_readwrite(paths.state_db)
+    except sqlite3.OperationalError as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not writable: {exc}",
+        )
+    if con is None:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        now_ts = datetime.now(timezone.utc).timestamp()
+        cutoff = now_ts - threshold_seconds
+        rows = con.execute(
+            """
+            SELECT id, model,
+                   datetime(started_at, 'unixepoch') AS started,
+                   ROUND(? - started_at, 0) AS age_seconds,
+                   message_count
+            FROM sessions
+            WHERE ended_at IS NULL
+              AND started_at < ?
+            ORDER BY started_at ASC
+            """,
+            (now_ts, cutoff),
+        ).fetchall()
+        would_modify = _rows_to_dicts(rows)
+        applied: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        if not dry_run and would_modify:
+            for r in would_modify:
+                cur = con.execute(
+                    "UPDATE sessions SET ended_at = ? WHERE id = ? AND ended_at IS NULL",
+                    (now_ts, r["id"]),
+                )
+                if cur.rowcount > 0:
+                    applied.append({"id": r["id"], "ended_at": now_ts})
+                else:
+                    skipped.append({
+                        "id": r["id"],
+                        "reason": "row already closed (concurrent writer?)",
+                    })
+            con.commit()
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=would_modify,
+            applied=applied,
+            skipped=skipped,
+        )
+    except sqlite3.Error as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"sqlite error: {exc}",
+        )
+    finally:
+        con.close()
+
+
+def _prune_ghost_sessions_action(
+    paths: ResolvedPaths,
+    *,
+    dry_run: bool,
+    since_ts: float,
+) -> dict[str, Any]:
+    """Tactical action for ``ghost_sessions``.
+
+    Deletes every session whose ``started_at`` is at or after the
+    window cutoff and which has zero rows in ``messages``. These are
+    aborted creates — a session row was inserted, the writer crashed
+    before any message arrived. There are no cost rows or message
+    rows to preserve; the session itself is the dead weight.
+
+    The window cutoff matches the detector's window so we never
+    delete ghosts older than the scan scope. (Out-of-window ghosts
+    are still diagnostic-only; deleting them silently would be
+    surprising.)
+    """
+    if not paths.state_db.exists():
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        con = _open_state_db_readwrite(paths.state_db)
+    except sqlite3.OperationalError as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not writable: {exc}",
+        )
+    if con is None:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"state.db not found: {paths.state_db}",
+        )
+    try:
+        rows = con.execute(
+            """
+            SELECT s.id, s.model, s.message_count,
+                   datetime(s.started_at, 'unixepoch') AS started
+            FROM sessions s
+            WHERE s.started_at >= ?
+              AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = s.id)
+            ORDER BY s.started_at DESC
+            """,
+            (since_ts,),
+        ).fetchall()
+        would_modify = _rows_to_dicts(rows)
+        applied: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        if not dry_run and would_modify:
+            for r in would_modify:
+                cur = con.execute(
+                    "DELETE FROM sessions WHERE id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = ?)",
+                    (r["id"], r["id"]),
+                )
+                if cur.rowcount > 0:
+                    applied.append({"id": r["id"]})
+                else:
+                    skipped.append({
+                        "id": r["id"],
+                        "reason": "row already gone or has messages now (concurrent writer?)",
+                    })
+            con.commit()
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=would_modify,
+            applied=applied,
+            skipped=skipped,
+        )
+    except sqlite3.Error as exc:
+        return _tactical_action_report(
+            dry_run=dry_run,
+            would_modify=[],
+            applied=[],
+            error=f"sqlite error: {exc}",
+        )
+    finally:
+        con.close()
+
+
+def apply_tactical_actions(
+    paths: ResolvedPaths,
+    *,
+    prune_stale_locks: bool = False,
+    close_zombies: bool = False,
+    prune_ghost_sessions: bool = False,
+    apply: bool = False,
+    days: int = DEFAULT_LOOKBACK_DAYS,
+    since: str | None = None,
+    state_db_override: Path | None = None,
+) -> dict[str, Any]:
+    """Apply tactical remediations to the profile's ``state.db``.
+
+    Each tactical flag defaults to **dry-run preview** — the report's
+    ``would_modify`` lists every row that would be changed, and no
+    bytes are written. Setting ``apply=True`` flips every selected
+    action to its write path; the per-action ``dry_run`` field
+    records which side actually ran.
+
+    Flags are independent. ``prune_stale_locks=True,
+    close_zombies=True`` runs both previews in one call; the
+    resulting ``report`` keys are stable regardless of which flags
+    are set (selected actions get a full report; unselected actions
+    get ``{"selected": False}``).
+
+    Backups: tactical actions write to ``state.db`` directly via
+    SQLite's WAL. They do **not** create a ``state.db.bak`` —
+    partial-file backup of a live SQLite DB is unsafe (the backup
+    may capture a mid-transaction state). The operator's existing
+    ``state.db`` backup regime is the contract for recovery.
+
+    Returned dict shape::
+
+        {
+          "prune_stale_locks": {...},
+          "close_zombies": {...},
+          "prune_ghost_sessions": {...},
+        }
+
+    Each per-action value has: ``ok`` (bool), ``dry_run`` (bool),
+    ``would_modify`` (list of dicts that would be touched),
+    ``applied`` (list of dicts actually written), ``skipped`` (list
+    of ``{... reason}`` rows that vanished between scan and write),
+    ``error`` (str or ``None``). Unselected actions have a single
+    ``{"selected": False}`` placeholder so consumers can iterate
+    ``TACTICAL_ACTION_IDS`` without conditional key access.
+
+    Parameters mirror the orchestrator's window knobs so the same
+    scan window applies to detection and action. ``state_db_override``
+    is the test seam — same purpose as
+    ``apply_config_suggestions(config_path=...)``.
+    """
+    window = resolve_window(days=days, since=since)
+    report: dict[str, Any] = {}
+    # Resolve the target state.db. The caller-provided override
+    # wins (test path); otherwise the resolved-profile path.
+    if state_db_override is not None:
+        paths = ResolvedPaths(
+            profile=paths.profile,
+            hermes_root=paths.hermes_root,
+            state_db=state_db_override,
+            log_dir=paths.log_dir,
+        )
+
+    if prune_stale_locks:
+        report[TACTICAL_PRUNE_STALE_LOCKS] = _prune_stale_locks_action(
+            paths, dry_run=not apply,
+        )
+    else:
+        report[TACTICAL_PRUNE_STALE_LOCKS] = {"selected": False}
+
+    if close_zombies:
+        report[TACTICAL_CLOSE_ZOMBIES] = _close_zombies_action(
+            paths, dry_run=not apply,
+        )
+    else:
+        report[TACTICAL_CLOSE_ZOMBIES] = {"selected": False}
+
+    if prune_ghost_sessions:
+        report[TACTICAL_PRUNE_GHOST_SESSIONS] = _prune_ghost_sessions_action(
+            paths, dry_run=not apply, since_ts=window.since_ts,
+        )
+    else:
+        report[TACTICAL_PRUNE_GHOST_SESSIONS] = {"selected": False}
+
+    return report
+
+
 def _dispatch(
     det_id: str,
     con: sqlite3.Connection | None,
@@ -1397,6 +1944,14 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
                 lines.append(f"           first flagged session: {ev['sessions'][0].get('id', '?')}")
             if "locks" in ev and ev["locks"]:
                 lines.append(f"           first stale lock: {ev['locks'][0].get('session_id', '?')}")
+        # Remediation hint: when the detector has a tactical action,
+        # print the exact argv shape so the operator knows what to
+        # paste. Only fired findings get a hint — telling the
+        # operator how to "fix" something that didn't fire is noise.
+        # Free-flight findings have ``remediation == None`` and are
+        # skipped silently.
+        if d.get("fired") and d.get("remediation"):
+            lines.append(f"           fix: {d['remediation']}")
 
     if free_flight_anomalies:
         lines.append("")
@@ -1431,6 +1986,41 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
         lines.append("Detector errors:")
         for det_id, err in report["detector_errors"].items():
             lines.append(f"  {det_id}: {err}")
+
+    tactical = report.get("tactical_actions")
+    if tactical:
+        lines.append("")
+        lines.append("Tactical actions:")
+        for action_id in TACTICAL_ACTION_IDS:
+            entry = tactical.get(action_id)
+            if entry is None or entry.get("selected") is False:
+                continue
+            ok = entry.get("ok", False)
+            dry = entry.get("dry_run", True)
+            err = entry.get("error")
+            verb = "would" if dry else "did"
+            if err:
+                lines.append(
+                    f"  ✗ [{action_id:28s}]  error: {err}"
+                )
+                continue
+            would = entry.get("would_modify", [])
+            applied = entry.get("applied", [])
+            skipped = entry.get("skipped", [])
+            count = len(would) if dry else len(applied)
+            tail = (
+                f"  ok — {verb} act on {count} row(s)"
+                if ok else f"  ! failed — {err}"
+            )
+            lines.append(f"  ✓ [{action_id:28s}]{tail}")
+            for row in (would if dry else applied)[:10]:
+                lines.append(
+                    f"           {json.dumps(row, default=str, sort_keys=True)}"
+                )
+            if skipped:
+                lines.append(
+                    f"           skipped: {len(skipped)} row(s) — concurrent writer?"
+                )
 
     lines.append("")
     lines.append("=" * 60)

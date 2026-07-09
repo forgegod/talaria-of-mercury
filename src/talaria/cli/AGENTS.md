@@ -144,34 +144,61 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   touched regardless of `--dry-run`. `--all-profiles` sweeps the
   root `~/.hermes/logs/` plus every `~/.hermes/profiles/*/logs/`.
 - `talaria hermes doctor` is a multi-detector profile anomaly scan
-  with an opt-in curator-driven config auto-apply. `doctor` takes
-  `--days` (look-back window in days, default 2), `--since`
-  (ISO date override), `--include-curator` (walk
-  `logs/curator/<ts>/` snapshot trees), `--only` (comma-separated
-  detector id whitelist), `--skip` (comma-separated blacklist;
-  unknown ids exit 2), `--no-free-flight` (opt out of the curator
-  pass for pure-deterministic runs), `--apply-suggestions` (opt in
-  to writing `config_suggestion` findings to `config.yaml` via the
-  atomic backup writer — `config.yaml.bak` is written first), and
-  `--dry-run` (preview the apply without writing; implies
-  `--apply-suggestions` but suppresses the write). The free-flight
-  curator pass is **default-on**: the whole point of `doctor` is
-  to find inconsistencies the operator didn't anticipate, and the
-  deterministic 11-detector pass only covers patterns the rules
-  know to look for. Other flags: `--profile`, `--state-db`,
+  with two opt-in remediation paths. `doctor` takes `--days`
+  (look-back window in days, default 2), `--since` (ISO date
+  override), `--include-curator` (walk `logs/curator/<ts>/`
+  snapshot trees), `--only` (comma-separated detector id
+  whitelist), `--skip` (comma-separated blacklist; unknown ids
+  exit 2), `--no-free-flight` (opt out of the curator pass for
+  pure-deterministic runs), `--apply-curator-suggestions` (opt in
+  to writing curator `config_suggestion` findings to `config.yaml`
+  via the atomic backup writer — `config.yaml.bak` is written
+  first), and `--dry-run` (preview the curator apply without
+  writing; implies `--apply-curator-suggestions` but suppresses
+  the write). The free-flight curator pass is **default-on**:
+  the whole point of `doctor` is to find inconsistencies the
+  operator didn't anticipate, and the deterministic 12-detector
+  pass only covers patterns the rules know to look for.
+  Three tactical-action flags add a second remediation path for
+  findings that have an unambiguous local fix:
+  `--prune-stale-locks` (drop expired rows in `compression_locks`),
+  `--close-zombies` (set `ended_at` on sessions whose writer
+  crashed without closing), and `--prune-ghost-sessions` (delete
+  sessions within the look-back window that have zero `messages`
+  rows). Each tactical flag defaults to **dry-run preview** — the
+  shared `--apply` flag is the gate that turns preview into write.
+  This explicit-consent convention matches `talaria skills prune`,
+  `talaria config sync`, and `talaria hermes log-rotate`: every
+  destructive write to operator state (config.yaml, state.db,
+  lock.json, logs/) is opt-in via `--apply`. Tactical writes go
+  directly to `state.db` via SQLite WAL — they do not create a
+  `state.db.bak` (a partial-file backup of a live SQLite DB is
+  unsafe; the operator's existing state.db backup regime is the
+  contract). Out-of-window ghosts are diagnostic-only and never
+  auto-deleted. Other flags: `--profile`, `--state-db`,
   `--log-dir`, `--json`, `--show-resolution`, `-q/--quiet`,
-  `-v/--verbose`. Exit code 0 when all detectors are clean, 1 when
-  any fires, 2 when `--only`/`--skip` contain unknown detector ids.
+  `-v/--verbose`.
+  Exit code 0 when all detectors are clean, 1 when any fires,
+  2 when `--only`/`--skip` contain unknown detector ids.
   Unlike the other inspection features, `doctor` is
   **print-by-default**: the operator ran an anomaly scan to see
   results, so the human report prints unless `-q/--quiet` is passed.
   `-v/--verbose` is a no-op alias kept for convenience.
   The report's `selected:` header lists the detectors that ran;
   when `--only` / `--skip` excludes any, a `skipped:` header lists
-  them so the operator sees what was left out. The 11 detector ids
+  them so the operator sees what was left out. The 12 detector ids
   and their thresholds are listed in the `Detector catalog` table
   in `hermos/AGENTS.md` and surfaced programmatically via
   `--show-resolution` (`detector_catalog` block).
+  Apply scope: `--apply-curator-suggestions` writes only curator
+  `config_suggestion` findings (findings whose id starts with
+  `free_flight:config:`). It does NOT apply anomaly findings —
+  those are diagnostic and have no tactical action. If the curator
+  pass returns no `config_suggestion` findings the flag is a no-op
+  even when set; that is expected, not a bug. Tactical flags are
+  independent of `--apply-curator-suggestions`: a curator
+  suggestion apply and a tactical apply can run in the same
+  doctor invocation without coupling their semantics.
 - `talaria hermes benchmark` is a per-model health/cost/latency/capability
   report. It takes `--days` (look-back window for state.db aggregation,
   default 7), `--ttl` (cache TTL in seconds for smoke results, default

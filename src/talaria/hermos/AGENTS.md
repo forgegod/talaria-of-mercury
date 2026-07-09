@@ -10,13 +10,13 @@ caches.
 
 - Each feature is a single module exposing `run(paths, **opts) -> dict`
   and `render_human(report) -> tuple[int, str]`.
-- `doctor` is a multi-detector profile anomaly scan. It runs 11
-  structured detectors against the resolved profile's `state.db` and
-  `logs/`, plus a default-on free-flight pass that hands the model
-  raw evidence (sessions' message text + log lines + aggregate stats
-  + the profile's `config.yaml`) and asks it to find unknown-unknown
-  anomalies and config improvements. Surfaced as
-  `talaria hermes doctor`.
+- `doctor` is a multi-detector profile anomaly scan. It runs 12
+  structured detectors against the resolved profile's `state.db`,
+  `logs/`, and skill registry, plus a default-on free-flight
+  pass that hands the model raw evidence (sessions' message text
+  + log lines + aggregate stats + the profile's `config.yaml`)
+  and asks it to find unknown-unknown anomalies and config
+  improvements. Surfaced as `talaria hermes doctor`.
 - `benchmark` is a per-model health/cost/latency/capability report.
   It discovers every unique `(model, provider)` pair from
   `config.yaml`, aggregates recent sessions from `state.db`, enriches
@@ -41,9 +41,16 @@ caches.
   like `auth`/`credentials`/`secrets` are fully redacted; leaf
   keys matching `api_key`/`token`/`password`/`secret` parts have
   their value replaced with `***REDACTED***`), then inlines the
-  redacted YAML into the prompt. Log files and `state.db` are
-  referenced via `@folder:` / `@file:` syntax. Two finding kinds
-  are returned: `anomaly` and `config_suggestion`.
+  redacted YAML into the prompt. Log files are referenced via
+  `@folder:` (framework-inlined). `state.db` is NOT inlined via
+  `@file:` — instead `_dump_database_slices` queries the database
+  read-only and writes four compact JSON slices (sessions metadata
+  within the look-back window, compression locks, high-signal
+  message failures, message truncations) to a temp directory. The
+  slice file paths are listed in the prompt as plain paths — the
+  model uses its file-read tools to inspect them on demand. The
+  temp directory survives the full subprocess call + result parsing.
+  Two finding kinds are returned: `anomaly` and `config_suggestion`.
 - `refresh_catalog` is profile-agnostic by design — every Hermes profile
   reads the same provider cache. `--gateway` selects which provider's
   catalog is fetched and which provider manifest is written (currently
@@ -206,6 +213,26 @@ caches.
   model=..., provider=..., timeout=...)`. A model failure /
   unavailability / parse error degrades to a no-op — the doctor
   command stays useful offline.
+- `doctor.run()` attaches a `remediation` field to every
+  `per_detector` entry via the `_with_remediation_hint` helper.
+  The field is the exact argv shape the operator can paste (e.g.
+  `"--prune-stale-locks [--apply]"` or
+  `"talaria skills prune --prune-filesystem-only
+  --prune-lock-only --prune-disabled-orphans --apply"`). Two
+  flavours of hint exist: doctor tactical flags (start with `--`,
+  append to the existing `talaria hermes doctor …` command) and
+  sibling-command remediations (start with the sibling command
+  name, e.g. `talaria skills prune`, because the remediation lives
+  in a different process with its own safety model). Detectors
+  without a remediation get `None`. The hint is attached
+  regardless of `fired` status so JSON consumers can introspect
+  every detector. The renderer prints a `fix: <hint>` line under
+  fired findings only — telling the operator how to fix a clean
+  detector would be noise. `_DETECTOR_REMEDIATION_HINTS` is the
+  single source of truth mapping detector id → hint text; free-
+  flight findings (anomaly + config_suggestion) deliberately do
+  NOT get enriched, because the tactical layer does not apply to
+  them.
 - `doctor_free_flight` redacts secrets before passing the evidence
   to the model. `_redact_raw_yaml` is a line-oriented scanner:
   parent blocks in `_REDACT_PARENT_KEYS` (`auth`, `credentials`,
@@ -233,8 +260,55 @@ caches.
   set; bad paths are captured as `skipped: [{yaml_path, reason}]`
   and never raise. `dry_run=True` reports a unified diff in
   `apply.dry_run_diff` without writing bytes. The CLI surface
-  is `--apply-suggestions` to write and `--dry-run` to preview;
-  neither is on by default.
+  is `--apply-curator-suggestions` to write and `--dry-run` to
+  preview; neither is on by default. The apply path is
+  curator-only: it filters the findings list to
+  `id.startswith("free_flight:config:")` and ignores anomaly
+  findings (deterministic detectors + free-flight `kind=anomaly`),
+  because anomaly findings are diagnostic and have no tactical
+  action. The flag name (`--apply-curator-suggestions`) reflects
+  this — only curator suggestions are applied.
+- `doctor.apply_tactical_actions()` is the second remediation path.
+  Most deterministic findings stay diagnostic; three have an
+  unambiguous local fix and are exposed as opt-in tactical flags:
+
+  * `TACTICAL_PRUNE_STALE_LOCKS` (`--prune-stale-locks`) — drops
+    every row in `compression_locks` whose `expires_at` is in the
+    past. Stale locks block the next compressor run and indicate a
+    crashed compressor process; deletion is the right action.
+  * `TACTICAL_CLOSE_ZOMBIES` (`--close-zombies`) — sets
+    `ended_at = now` on sessions whose `started_at` is older
+    than `ZOMBIE_THRESHOLD_SECONDS` and whose `ended_at IS NULL`.
+    The session row is preserved (only `ended_at` is written) so
+    the audit trail of the crash survives.
+  * `TACTICAL_PRUNE_GHOST_SESSIONS` (`--prune-ghost-sessions`)
+    — deletes sessions within the look-back window whose `messages`
+    join is empty. These are aborted creates — the session row
+    was inserted but the writer crashed before any message
+    arrived; there is nothing to preserve.
+
+  Each flag defaults to **dry-run preview**: the report's
+  `would_modify` lists every row that would be touched and no
+  bytes are written. `--apply` flips every selected tactical
+  flag into its write path; the per-action `dry_run` field
+  records which side actually ran. The explicit-consent default
+  (preview-by-default, write-on-`--apply`) matches the rest of
+  Talaria's destructive-write tools: `talaria skills prune`,
+  `talaria config sync`, `talaria hermes log-rotate`. Flags are
+  independent — a doctor invocation can run any subset, and
+  unselected actions return `{"selected": False}` so consumers
+  can iterate `TACTICAL_ACTION_IDS` without conditional key
+  access.
+
+  Tactical writes go directly to `state.db` via SQLite WAL. They
+  do NOT create a `state.db.bak` because partial-file backup of
+  a live SQLite DB can capture a mid-transaction state and the
+  operator's existing `state.db` backup regime is the contract
+  for recovery. The other nine findings (truncation, stream
+  drops, compression failures, rewinds, handoff errors, cost
+  anomalies, skill_index_drift, and the unused-not-yet-flagged
+  free-flight anomaly class) stay diagnostic because they need
+  human context to fix correctly.
 - The canonical operator-facing detector catalog (id, what it
   checks, threshold, severity, where it queries) is the
   `Detector catalog` table below. The same data is also surfaced
@@ -454,7 +528,16 @@ its findings (anomaly + config_suggestion) are emitted under the
   stub `free_flight_runner`, `--only` /
   `--skip` filtering (incl. unknown-id exit 2), missing state.db
   resilience, renderer for both structured and free-flight groups,
-  and CLI subprocess coverage for the full flag set.
+  CLI subprocess coverage for the full flag set, the
+  tactical-action layer (`TestTacticalActions`) covering dry-run
+  previews, actual writes, idempotency, out-of-window preservation,
+  missing-DB error reporting, combined-flag independence, and
+  stable report keys via `TACTICAL_ACTION_IDS`, and the
+  remediation-hint layer (`TestRemediationHints`) covering
+  `_with_remediation_hint` shape (known + unknown + free-flight
+  detectors), tactical-detector/map consistency, JSON report
+  integration, and the renderer's `fix:` line gating on
+  `fired=True`.
 - `doctor_free_flight` tests cover: config redaction (parent
   blocks recursively redacted, leaf keys by split-part matching,
   `max_tokens` preserved, comments/blanks preserved), zero-log-lines

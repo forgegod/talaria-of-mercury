@@ -647,6 +647,555 @@ class TestApplySuggestions:
         assert "max_tokens: 16384" in cfg.read_text()
 
 
+# ---------------- Tactical-action tests ----------------
+class TestTacticalActions:
+    """Tests for ``doctor.apply_tactical_actions`` and its per-class helpers.
+
+    Each test seeds a focused state.db via ``make_full_state_db``,
+    invokes the apply path, then re-reads the DB to verify the actual
+    write. Dry-run previews must NOT change the DB; apply runs must.
+    """
+
+    def _paths(self, tmp_path: Path, *, state_db: Path) -> ResolvedPaths:
+        return ResolvedPaths(
+            profile="test", hermes_root=tmp_path,
+            state_db=state_db, log_dir=tmp_path / "logs",
+        )
+
+    def _seed_stale_lock(self, db: Path) -> None:
+        """Two sessions, each with one lock: one expired, one live.
+
+        ``compression_locks.session_id`` is PRIMARY KEY, so there is at
+        most one lock per session. The action must therefore operate on
+        per-session rows, not (session_id, holder, expires_at) tuples.
+
+        Both sessions receive a message row so they're not classified
+        as ghosts by the unrelated prune_ghost_sessions action — that
+        keeps the combined-flag test focused on the lock pruning.
+        """
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[
+                {"id": "stale_s", "source": "cli",
+                 "model": "minimax/minimax-m3",
+                 "started_at": now - 3600, "ended_at": now - 60,
+                 "output_tokens": 100, "message_count": 5,
+                 "api_call_count": 5, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0.01, "actual_cost_usd": 0.01,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+                {"id": "live_s", "source": "cli",
+                 "model": "minimax/minimax-m3",
+                 "started_at": now - 60, "ended_at": now - 30,
+                 "output_tokens": 50, "message_count": 2,
+                 "api_call_count": 2, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0.005, "actual_cost_usd": 0.005,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+            ],
+            messages=[
+                {"session_id": "stale_s", "role": "user", "content": "hi",
+                 "timestamp": now - 3600, "finish_reason": "stop"},
+                {"session_id": "live_s", "role": "user", "content": "hi",
+                 "timestamp": now - 60, "finish_reason": "stop"},
+            ],
+            compression_locks=[
+                # Expired: well in the past
+                {"session_id": "stale_s", "holder": "compressor-1",
+                 "acquired_at": now - 7200, "expires_at": now - 3600},
+                # Live: expires in the future
+                {"session_id": "live_s", "holder": "compressor-2",
+                 "acquired_at": now - 60, "expires_at": now + 3600},
+            ],
+        )
+
+    def test_prune_stale_locks_dry_run_does_not_write(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        self._seed_stale_lock(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, apply=False,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]
+        assert entry["ok"] is True
+        assert entry["dry_run"] is True
+        assert len(entry["would_modify"]) == 1
+        assert entry["would_modify"][0]["session_id"] == "stale_s"
+        assert entry["would_modify"][0]["holder"] == "compressor-1"
+        assert entry["applied"] == []
+        # DB unchanged: both locks still present
+        con = sqlite3.connect(db)
+        try:
+            rows = con.execute("SELECT COUNT(*) FROM compression_locks").fetchone()
+            assert rows[0] == 2
+        finally:
+            con.close()
+
+    def test_prune_stale_locks_apply_writes(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        self._seed_stale_lock(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, apply=True,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]
+        assert entry["ok"] is True
+        assert entry["dry_run"] is False
+        assert len(entry["applied"]) == 1
+        # Only the live lock remains
+        con = sqlite3.connect(db)
+        try:
+            rows = con.execute(
+                "SELECT holder FROM compression_locks"
+            ).fetchall()
+            holders = [r[0] for r in rows]
+            assert holders == ["compressor-2"]
+        finally:
+            con.close()
+
+    def test_prune_stale_locks_is_idempotent(self, tmp_path: Path) -> None:
+        """Second apply must be a no-op (the expired lock is already gone)."""
+        db = tmp_path / "state.db"
+        self._seed_stale_lock(db)
+        paths = self._paths(tmp_path, state_db=db)
+        doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, apply=True,
+            state_db_override=db,
+        )
+        rep = doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, apply=True,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]
+        assert entry["ok"] is True
+        assert entry["applied"] == []
+        assert entry["would_modify"] == []
+
+    def _seed_zombie(self, db: Path) -> None:
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[
+                # Zombie: started >24h ago, never ended
+                {"id": "z1", "source": "cli", "model": "minimax/minimax-m3",
+                 "started_at": now - 86400 * 3, "ended_at": None,
+                 "output_tokens": 0, "message_count": 0,
+                 "api_call_count": 0, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0, "actual_cost_usd": 0,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+                # Healthy: started recently and ended
+                {"id": "h1", "source": "cli", "model": "minimax/minimax-m3",
+                 "started_at": now - 60, "ended_at": now,
+                 "output_tokens": 10, "message_count": 2,
+                 "api_call_count": 2, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0.001, "actual_cost_usd": 0.001,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+            ],
+        )
+
+    def test_close_zombies_dry_run_preserves_session(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        self._seed_zombie(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, close_zombies=True, apply=False,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_CLOSE_ZOMBIES]
+        assert entry["ok"] is True
+        assert entry["dry_run"] is True
+        assert len(entry["would_modify"]) == 1
+        assert entry["would_modify"][0]["id"] == "z1"
+        # Row preserved with ended_at still NULL
+        con = sqlite3.connect(db)
+        try:
+            row = con.execute(
+                "SELECT ended_at FROM sessions WHERE id = 'z1'"
+            ).fetchone()
+            assert row[0] is None
+        finally:
+            con.close()
+
+    def test_close_zombies_apply_sets_ended_at(self, tmp_path: Path) -> None:
+        db = tmp_path / "state.db"
+        self._seed_zombie(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, close_zombies=True, apply=True,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_CLOSE_ZOMBIES]
+        assert entry["ok"] is True
+        assert entry["dry_run"] is False
+        assert len(entry["applied"]) == 1
+        assert entry["applied"][0]["id"] == "z1"
+        con = sqlite3.connect(db)
+        try:
+            row = con.execute(
+                "SELECT ended_at FROM sessions WHERE id = 'z1'"
+            ).fetchone()
+            assert row[0] is not None
+        finally:
+            con.close()
+
+    def _seed_ghost(self, db: Path) -> None:
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[
+                # Ghost: started, no messages, within window
+                {"id": "g1", "source": "cli", "model": "minimax/minimax-m3",
+                 "started_at": now - 3600, "ended_at": None,
+                 "output_tokens": 0, "message_count": 0,
+                 "api_call_count": 0, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0, "actual_cost_usd": 0,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+                # Healthy: has messages
+                {"id": "ok1", "source": "cli", "model": "minimax/minimax-m3",
+                 "started_at": now - 60, "ended_at": now,
+                 "output_tokens": 100, "message_count": 2,
+                 "api_call_count": 2, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0.001, "actual_cost_usd": 0.001,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+            ],
+            messages=[
+                {"session_id": "ok1", "role": "user", "content": "hi",
+                 "timestamp": now - 60, "finish_reason": "stop"},
+                {"session_id": "ok1", "role": "assistant",
+                 "content": "hello", "timestamp": now - 30,
+                 "finish_reason": "stop"},
+            ],
+        )
+
+    def test_prune_ghost_sessions_apply_deletes_row(
+        self, tmp_path: Path,
+    ) -> None:
+        db = tmp_path / "state.db"
+        self._seed_ghost(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, prune_ghost_sessions=True, apply=True,
+            days=1, since=None,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_GHOST_SESSIONS]
+        assert entry["ok"] is True
+        assert entry["dry_run"] is False
+        assert len(entry["applied"]) == 1
+        assert entry["applied"][0]["id"] == "g1"
+        # Ghost gone; healthy session preserved
+        con = sqlite3.connect(db)
+        try:
+            rows = con.execute(
+                "SELECT id FROM sessions ORDER BY id"
+            ).fetchall()
+            assert [r[0] for r in rows] == ["ok1"]
+        finally:
+            con.close()
+
+    def test_prune_ghost_sessions_preserves_out_of_window(
+        self, tmp_path: Path,
+    ) -> None:
+        """A ghost older than the window must NOT be auto-deleted."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[
+                {"id": "old_ghost", "source": "cli",
+                 "model": "minimax/minimax-m3",
+                 "started_at": now - 86400 * 30, "ended_at": None,
+                 "output_tokens": 0, "message_count": 0,
+                 "api_call_count": 0, "rewind_count": 0, "archived": 0,
+                 "estimated_cost_usd": 0, "actual_cost_usd": 0,
+                 "cost_status": "ok", "end_reason": "cli_close"},
+            ],
+        )
+        paths = self._paths(tmp_path, state_db=db)
+        # 1-day window: 30-day-old ghost is out of scope
+        rep = doctor.apply_tactical_actions(
+            paths, prune_ghost_sessions=True, apply=True,
+            days=1, since=None,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_GHOST_SESSIONS]
+        assert entry["ok"] is True
+        assert entry["would_modify"] == []
+        assert entry["applied"] == []
+
+    def test_no_flags_returns_unselected_placeholders(
+        self, tmp_path: Path,
+    ) -> None:
+        """No tactical flag → every key is ``{"selected": False}``."""
+        db = tmp_path / "state.db"
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, apply=False, state_db_override=db,
+        )
+        for action_id in doctor.TACTICAL_ACTION_IDS:
+            assert rep[action_id] == {"selected": False}
+
+    def test_combined_flags_each_get_full_report(
+        self, tmp_path: Path,
+    ) -> None:
+        """All three flags at once → each gets its own report key."""
+        db = tmp_path / "state.db"
+        self._seed_stale_lock(db)
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, close_zombies=True,
+            prune_ghost_sessions=True, apply=False,
+            state_db_override=db,
+        )
+        assert "ok" in rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]
+        assert "ok" in rep[doctor.TACTICAL_CLOSE_ZOMBIES]
+        assert "ok" in rep[doctor.TACTICAL_PRUNE_GHOST_SESSIONS]
+        # Stale lock was seeded; the other two have nothing to do
+        assert len(rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]["would_modify"]) == 1
+        assert rep[doctor.TACTICAL_CLOSE_ZOMBIES]["would_modify"] == []
+        assert rep[doctor.TACTICAL_PRUNE_GHOST_SESSIONS]["would_modify"] == []
+
+    def test_missing_state_db_reports_error(self, tmp_path: Path) -> None:
+        db = tmp_path / "missing.db"
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(
+            paths, prune_stale_locks=True, apply=True,
+            state_db_override=db,
+        )
+        entry = rep[doctor.TACTICAL_PRUNE_STALE_LOCKS]
+        assert entry["ok"] is False
+        assert "not found" in entry["error"]
+
+    def test_report_keys_are_stable_across_calls(
+        self, tmp_path: Path,
+    ) -> None:
+        """Iterating ``TACTICAL_ACTION_IDS`` must always yield a key."""
+        db = tmp_path / "state.db"
+        paths = self._paths(tmp_path, state_db=db)
+        rep = doctor.apply_tactical_actions(paths, state_db_override=db)
+        assert set(rep.keys()) == set(doctor.TACTICAL_ACTION_IDS)
+
+
+# ---------------- Remediation-hint tests ----------------
+class TestRemediationHints:
+    """Tests for the ``per_detector[i].remediation`` field and the
+    ``fix: …`` line in the human renderer.
+
+    The contract is: every detector that has a tactical action gets a
+    remediation hint string; everything else gets ``None``. The renderer
+    only prints the hint under fired findings, so telling the operator
+    how to "fix" a clean detector is noise.
+    """
+
+    def test_with_remediation_hint_known_detector(self) -> None:
+        d = {"id": doctor.ZOMBIE_SESSIONS, "severity": "alert",
+             "summary": "x", "evidence": {}, "fired": True,
+             "borderline": False, "adjudicated": False,
+             "model_verdict": None}
+        out = doctor._with_remediation_hint(d)
+        assert out["remediation"] == "--close-zombies [--apply]"
+        # Original dict not mutated (shallow copy contract)
+        assert "remediation" not in d
+
+    def test_with_remediation_hint_unknown_detector_is_none(self) -> None:
+        d = {"id": "truncation_output", "severity": "alert",
+             "summary": "x", "evidence": {}, "fired": True,
+             "borderline": False, "adjudicated": False,
+             "model_verdict": None}
+        out = doctor._with_remediation_hint(d)
+        assert out["remediation"] is None
+
+    def test_with_remediation_hint_free_flight_is_none(self) -> None:
+        # Curator findings are deliberately NOT enriched — adding
+        # ``remediation`` here would falsely imply tactical flags apply.
+        d = {"id": "free_flight:anomaly:weird_thing", "severity": "alert",
+             "summary": "x", "evidence": {}, "fired": True,
+             "borderline": False, "adjudicated": True,
+             "model_verdict": {"verdict": "alert"}}
+        out = doctor._with_remediation_hint(d)
+        assert out["remediation"] is None
+
+        d = {"id": "free_flight:config:bump_max_tokens", "severity": "info",
+             "summary": "x", "evidence": {}, "fired": False,
+             "borderline": False, "adjudicated": True,
+             "model_verdict": {"verdict": "info"}}
+        out = doctor._with_remediation_hint(d)
+        assert out["remediation"] is None
+
+    def test_each_tactical_detector_has_a_hint(self) -> None:
+        # Sanity: every detector with a tactical action must be in
+        # the hint map, so the operator never sees a fired finding
+        # without a fix hint.
+        for det_id, action_id in (
+            (doctor.COMPRESSION_STALE_LOCKS,
+             doctor.TACTICAL_PRUNE_STALE_LOCKS),
+            (doctor.ZOMBIE_SESSIONS, doctor.TACTICAL_CLOSE_ZOMBIES),
+            (doctor.GHOST_SESSIONS, doctor.TACTICAL_PRUNE_GHOST_SESSIONS),
+        ):
+            assert det_id in doctor._DETECTOR_REMEDIATION_HINTS, (
+                f"detector {det_id} has a tactical action ({action_id}) "
+                "but no entry in _DETECTOR_REMEDIATION_HINTS — operator "
+                "would see a fired finding with no fix hint."
+            )
+            # Tactical hints must be doctor-flag-shaped so the
+            # operator can paste them onto their existing
+            # ``talaria hermes doctor …`` command line.
+            hint = doctor._DETECTOR_REMEDIATION_HINTS[det_id]
+            assert hint.startswith("--"), (
+                f"{det_id} tactical hint {hint!r} should start with -- "
+                "so it appends to the doctor command, not replace it"
+            )
+
+    def test_skill_index_drift_hint_points_at_sibling_command(self) -> None:
+        # ``skill_index_drift`` has an actionable remediation but it
+        # lives in ``talaria skills prune``, not in the doctor's
+        # tactical layer. The hint must (a) be present so the operator
+        # sees a fix, and (b) start with the sibling command name so
+        # the operator cannot mistake it for a doctor flag.
+        hint = doctor._DETECTOR_REMEDIATION_HINTS[doctor.SKILL_INDEX_DRIFT]
+        assert hint.startswith("talaria skills prune"), (
+            f"skill_index_drift hint must start with the sibling "
+            f"command name so it cannot be mistaken for a doctor flag; "
+            f"got {hint!r}"
+        )
+        # The sibling command's dry-run-by-default safety model means
+        # the hint can include ``--apply`` directly — the operator
+        # will preview before committing because the bare command
+        # without --apply is dry-run.
+        assert "--apply" in hint
+        # All three drift classes are listed so the hint is correct
+        # for any single-class or multi-class drift finding.
+        for flag in (
+            "--prune-filesystem-only", "--prune-lock-only",
+            "--prune-disabled-orphans",
+        ):
+            assert flag in hint, (
+                f"skill_index_drift hint missing {flag}; the operator "
+                "needs to know about every drift class"
+            )
+
+    def test_json_report_carries_remediation_field(
+        self, tmp_path: Path,
+    ) -> None:
+        """End-to-end: ``doctor.run()`` attaches ``remediation`` to the
+        per-detector JSON entries.
+
+        The hint is attached regardless of fired status — JSON
+        consumers can introspect every detector and know what flag
+        would apply. The renderer is what gates the hint on
+        ``fired=True``; the underlying JSON shape stays uniform.
+        """
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(
+            db,
+            sessions=[{
+                "id": "z1", "source": "cli", "model": "minimax/minimax-m3",
+                "started_at": now - 86400 * 3, "ended_at": None,
+                "output_tokens": 0, "message_count": 0,
+                "api_call_count": 0, "rewind_count": 0, "archived": 0,
+                "estimated_cost_usd": 0, "actual_cost_usd": 0,
+                "cost_status": "ok", "end_reason": "cli_close",
+            }],
+        )
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = doctor.run(
+            paths, days=2, since=None, include_curator=False,
+            free_flight=False,
+        )
+        per = {d["id"]: d for d in report["per_detector"]}
+        # Zombie fired → remediation present and matches.
+        assert per[doctor.ZOMBIE_SESSIONS]["fired"] is True
+        assert per[doctor.ZOMBIE_SESSIONS]["remediation"] == (
+            "--close-zombies [--apply]"
+        )
+        # The other two tactical detectors did NOT fire (no rows in
+        # their tables) but still carry the hint so consumers know
+        # the remediation shape if they ever do fire.
+        for det_id in (
+            doctor.COMPRESSION_STALE_LOCKS, doctor.GHOST_SESSIONS,
+        ):
+            assert per[det_id]["fired"] is False
+            assert per[det_id]["remediation"], (
+                f"{det_id} should carry its remediation hint even when not fired"
+            )
+        # Non-tactical detectors get None — they have no remediation.
+        # Note: skill_index_drift is NOT in this list because it has
+        # a remediation too (talaria skills prune) — see the
+        # dedicated test above for that hint's contract.
+        non_tactical = (
+            "truncation_output", "truncation_finish_reason",
+            "truncation_log_markers", "stream_drops",
+            "compression_failures", "rewinds", "handoff_errors",
+            "cost_anomalies",
+        )
+        for det_id in non_tactical:
+            entry = per.get(det_id)
+            if entry is None:
+                continue
+            assert entry["remediation"] is None, (
+                f"{det_id} unexpectedly carries a remediation hint"
+            )
+
+    def test_renderer_prints_fix_line_for_fired_finding(
+        self, tmp_path: Path,
+    ) -> None:
+        """The human renderer prints ``fix: <hint>`` after the fired
+        finding so the operator sees the remediation next to the
+        evidence."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(
+            db,
+            compression_locks=[{
+                "session_id": "s1", "holder": "compressor-1",
+                "acquired_at": now - 7200, "expires_at": now - 3600,
+            }],
+            sessions=[{
+                "id": "s1", "source": "cli", "model": "minimax/minimax-m3",
+                "started_at": now - 3600, "ended_at": now - 60,
+                "output_tokens": 100, "message_count": 5,
+                "api_call_count": 5, "rewind_count": 0, "archived": 0,
+                "estimated_cost_usd": 0.01, "actual_cost_usd": 0.01,
+                "cost_status": "ok", "end_reason": "cli_close",
+            }],
+        )
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = doctor.run(
+            paths, days=2, since=None, include_curator=False,
+            free_flight=False,
+        )
+        _, text = doctor.render_human(report)
+        # The fix line lives under the compression_stale_locks entry.
+        # The summary line + first-flagged-line + fix line all share
+        # the leading whitespace.
+        assert "fix: --prune-stale-locks [--apply]" in text
+
+    def test_renderer_skips_fix_line_for_clean_detector(
+        self, tmp_path: Path,
+    ) -> None:
+        """A detector that did NOT fire should not emit a fix hint —
+        telling the operator how to fix something that isn't broken
+        is noise."""
+        db = tmp_path / "state.db"
+        make_full_state_db(db)  # empty state.db
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        paths = _paths(tmp_path, state_db=db, log_dir=log_dir)
+        report = doctor.run(
+            paths, days=2, since=None, include_curator=False,
+            free_flight=False,
+        )
+        _, text = doctor.render_human(report)
+        # No fired detector → no fix hint anywhere.
+        assert "fix:" not in text
+
+
 # ---------------- Redaction tests ----------------
 
 class TestRedaction:
@@ -824,6 +1373,172 @@ class TestFreeFlight:
         assert "offline" in results[0].summary
 
 
+class TestDumpDatabaseSlices:
+    """Coverage for :func:`doctor_free_flight._dump_database_slices`."""
+
+    def test_writes_all_four_slices(self, tmp_path: Path) -> None:
+        """All four JSON slice files are created with correct keys."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "s1", "source": "cli", "model": "glm-5.2",
+             "started_at": now - 60, "output_tokens": 500,
+             "message_count": 10, "rewind_count": 0,
+             "estimated_cost_usd": 0.01, "actual_cost_usd": 0.01,
+             "cost_status": "ok", "end_reason": "cli_close",
+             "ended_at": now},
+        ], messages=[
+            {"session_id": "s1", "role": "tool", "content": "error: something failed",
+             "timestamp": now - 30, "finish_reason": "stop"},
+        ], compression_locks=[
+            {"session_id": "s1", "holder": "compressor", "acquired_at": now - 10,
+             "expires_at": now + 100},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        for key in ("sessions", "compression_locks",
+                    "messages_failures", "messages_truncations"):
+            assert key in slices
+            assert slices[key].exists()
+
+    def test_sessions_slice_contains_rows(self, tmp_path: Path) -> None:
+        """Sessions slice has the inserted session with expected columns."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "s1", "source": "cli", "model": "glm-5.2",
+             "started_at": now - 60, "output_tokens": 500,
+             "message_count": 10, "rewind_count": 2,
+             "estimated_cost_usd": 0.01, "actual_cost_usd": 0.01,
+             "cost_status": "ok", "end_reason": "cli_close",
+             "ended_at": now},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["sessions"].read_text())
+        assert len(data) == 1
+        assert data[0]["id"] == "s1"
+        assert data[0]["model"] == "glm-5.2"
+        assert data[0]["rewind_count"] == 2
+
+    def test_sessions_slice_respects_time_window(self, tmp_path: Path) -> None:
+        """Sessions older than since_ts are excluded."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, sessions=[
+            {"id": "old", "source": "cli", "model": "m1",
+             "started_at": now - 86400 * 30, "output_tokens": 100,
+             "message_count": 1, "rewind_count": 0,
+             "end_reason": "cli_close", "ended_at": now - 86400 * 30 + 10},
+            {"id": "new", "source": "cli", "model": "m1",
+             "started_at": now - 60, "output_tokens": 200,
+             "message_count": 1, "rewind_count": 0,
+             "end_reason": "cli_close", "ended_at": now},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["sessions"].read_text())
+        assert len(data) == 1
+        assert data[0]["id"] == "new"
+
+    def test_failures_slice_captures_error_messages(self, tmp_path: Path) -> None:
+        """Messages containing error keywords appear in failures slice."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, messages=[
+            {"session_id": "s1", "role": "tool",
+             "content": "Traceback: ValueError: something failed",
+             "timestamp": now - 30, "finish_reason": "stop"},
+            {"session_id": "s1", "role": "assistant",
+             "content": "All good here",
+             "timestamp": now - 20, "finish_reason": "stop"},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["messages_failures"].read_text())
+        assert len(data) == 1
+        assert "failed" in data[0]["content_preview"]
+
+    def test_truncations_slice_captures_length_finish_reason(self, tmp_path: Path) -> None:
+        """Messages with finish_reason='length' appear in truncations slice."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, messages=[
+            {"session_id": "s1", "role": "assistant",
+             "content": "x" * 2000,
+             "timestamp": now - 30, "finish_reason": "length"},
+            {"session_id": "s1", "role": "assistant",
+             "content": "short",
+             "timestamp": now - 20, "finish_reason": "stop"},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["messages_truncations"].read_text())
+        assert len(data) == 1
+        assert data[0]["finish_reason"] == "length"
+        # Content preview should be capped
+        assert len(data[0]["content_preview"]) <= doctor_free_flight.CONTENT_PREVIEW_CHARS
+
+    def test_compression_locks_slice_has_rows(self, tmp_path: Path) -> None:
+        """Compression locks are dumped."""
+        db = tmp_path / "state.db"
+        now = _now()
+        make_full_state_db(db, compression_locks=[
+            {"session_id": "s1", "holder": "compressor",
+             "acquired_at": now - 10, "expires_at": now + 100},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["compression_locks"].read_text())
+        assert len(data) == 1
+        assert data[0]["session_id"] == "s1"
+        assert data[0]["holder"] == "compressor"
+
+    def test_missing_db_produces_empty_slices(self, tmp_path: Path) -> None:
+        """When state.db does not exist, all slices are empty arrays."""
+        paths = _paths(
+            tmp_path, state_db=tmp_path / "nonexistent.db",
+            log_dir=tmp_path / "logs",
+        )
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=0,
+        )
+        for key in ("sessions", "compression_locks",
+                    "messages_failures", "messages_truncations"):
+            data = json.loads(slices[key].read_text())
+            assert data == []
+
+    def test_content_preview_is_truncated(self, tmp_path: Path) -> None:
+        """Message content previews do not exceed CONTENT_PREVIEW_CHARS."""
+        db = tmp_path / "state.db"
+        now = _now()
+        long_content = "error: " + "x" * 5000
+        make_full_state_db(db, messages=[
+            {"session_id": "s1", "role": "tool",
+             "content": long_content,
+             "timestamp": now - 30, "finish_reason": "stop"},
+        ])
+        paths = _paths(tmp_path, state_db=db, log_dir=tmp_path / "logs")
+        slices = doctor_free_flight._dump_database_slices(
+            paths, tmp_path / "slices", since_ts=now - 3600,
+        )
+        data = json.loads(slices["messages_failures"].read_text())
+        assert len(data) == 1
+        assert len(data[0]["content_preview"]) <= doctor_free_flight.CONTENT_PREVIEW_CHARS
+
+
 class TestOrchestratorFreeFlight:
     def _setup(self, tmp_path: Path) -> ResolvedPaths:
         """Shared setup: state.db + log_dir + minimal config.yaml."""
@@ -891,10 +1606,14 @@ class TestCli:
         )
         assert result.returncode == 0
         assert "--no-free-flight" in result.stdout
-        assert "--apply-suggestions" in result.stdout
+        assert "--apply-curator-suggestions" in result.stdout
         assert "--dry-run" in result.stdout
         assert "--only" in result.stdout
         assert "--skip" in result.stdout
+        assert "--prune-stale-locks" in result.stdout
+        assert "--close-zombies" in result.stdout
+        assert "--prune-ghost-sessions" in result.stdout
+        assert "--apply" in result.stdout
 
     def test_version_flag(self) -> None:
         result = subprocess.run(

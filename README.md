@@ -12,7 +12,7 @@ The name is deliberate. In the [Greek mythos](https://en.wikipedia.org/wiki/Tala
 
 Talaria gives Hermes operators a single installable CLI for everything the agent itself doesn't cover — multi-detector anomaly diagnosis, per-model benchmarking, skill lifecycle management, and controlled configuration sync across profiles:
 
-- 🩺 **Diagnose agent anomalies** — 11 structured detectors scan `state.db` + `logs/` for truncation, compression stalls, zombie sessions, cost spikes, and more, plus a default-on free-flight pass that hands the assembled evidence to the operator's curator model for open-ended anomaly detection and config suggestions.
+- 🩺 **Diagnose agent anomalies** — 12 structured detectors scan `state.db` + `logs/` + skill registry for truncation, compression stalls, zombie sessions, cost spikes, and more, plus a default-on free-flight pass that hands the assembled evidence to the operator's curator model for open-ended anomaly detection and config suggestions.
 - 📊 **Benchmark every model** — per-model health, cost, latency, reasoning level, and capabilities (vision, tool-call, structured-output, context/output limits, per-token cost) for every `(model, provider)` pair the profile routes through. Combines `state.db` session aggregation, `models.dev` capability data, and cached JSON smoke calls — one deduplicated call per unique pair, not per config reference.
 - 👁️ **Verify vision capability** — the benchmark automatically sends real images to every vision-capable model (per models.dev) and asserts the model reads them correctly: counting, OCR, spatial reasoning, and brand-logo recognition. `--no-vision` disables the checks.
 - 🧩 **Manage skills at scale** — recursively install, categorize, and uninstall third-party skill collections from GitHub or skills.sh, with collision detection and fuzzy similarity matching to prevent silent overwrites.
@@ -139,7 +139,7 @@ talaria paths
 talaria hermes doctor
 
 # Preview config suggestions from the free-flight curator pass without writing
-talaria hermes doctor --apply-suggestions --dry-run
+talaria hermes doctor --apply-curator-suggestions --dry-run
 
 # Benchmark every model: health + cost + latency + capabilities + vision
 talaria hermes benchmark
@@ -172,7 +172,7 @@ eval "$(talaria completion zsh)"
 
 ## Feature: `talaria hermes doctor`
 
-Runs 11 structured detectors against the resolved profile's `state.db` and `logs/`, plus a default-on free-flight curator pass that hands the assembled evidence to the operator's configured `_curator` model for open-ended anomaly detection and config suggestions. The free-flight pass is the only way the structured detectors catch unknown-unknown anomalies — pass `--no-free-flight` for pure deterministic results. Use `--apply-suggestions` to write config-suggestion findings into the profile's `config.yaml` (atomic backup first; `--dry-run` previews the diff).
+Runs 12 structured detectors against the resolved profile's `state.db`, `logs/`, and skill registry, plus a default-on free-flight curator pass that hands the assembled evidence to the operator's configured `_curator` model for open-ended anomaly detection and config suggestions. The free-flight pass is the only way the structured detectors catch unknown-unknown anomalies — pass `--no-free-flight` for pure deterministic results. Use `--apply-curator-suggestions` to write curator `config_suggestion` findings into the profile's `config.yaml` (atomic backup first; `--dry-run` previews the diff). Note: anomaly findings are diagnostic only; they have no tactical action and are never applied.
 
 ### Usage
 
@@ -192,8 +192,12 @@ talaria hermes doctor --only truncation_output,zombie_sessions
 | `--only ID,ID,...` | all | Comma-separated detector id whitelist. |
 | `--skip ID,ID,...` | none | Comma-separated detector id blacklist. |
 | `--no-free-flight` | off | Skip the curator model pass; pure deterministic. |
-| `--apply-suggestions` | off | Write `config_suggestion` findings to `config.yaml` (atomic backup first). |
+| `--apply-curator-suggestions` | off | Write curator `config_suggestion` findings to `config.yaml` (atomic backup first). Anomaly findings are not applied. |
 | `--dry-run` | off | Preview the apply diff without writing. |
+| `--prune-stale-locks` | off | Preview (default) or apply (with `--apply`) the stale-lock tactical action. |
+| `--close-zombies` | off | Preview or apply (with `--apply`) the zombie-closure tactical action. |
+| `--prune-ghost-sessions` | off | Preview or apply (with `--apply`) the ghost-session tactical action. |
+| `--apply` | off | Gate the tactical write paths; no-op when no tactical flag is set. |
 | `--include-curator` | off | Walk `logs/curator/<ts>/` snapshot trees. |
 | `--profile NAME` | from env/file | Profile to inspect. |
 | `--state-db PATH` | resolved | Override the `state.db` path. |
@@ -205,7 +209,56 @@ talaria hermes doctor --only truncation_output,zombie_sessions
 
 ### Detectors
 
-The 11 deterministic detectors cover: output-token truncation (SQL + log markers + finish_reason), stream drops, compression stale locks/failures, rewind storms, handoff errors, cost anomalies, zombie sessions, and ghost sessions. Exit code is 1 if any detector fires; 0 if clean. The free-flight curator pass is default-on and finds issues the deterministic rules don't know to look for.
+The 12 deterministic detectors cover: output-token truncation (SQL + log markers + finish_reason), stream drops, compression stale locks/failures, rewind storms, handoff errors, cost anomalies, zombie sessions, ghost sessions, and skill-index drift. Exit code is 1 if any detector fires; 0 if clean. The free-flight curator pass is default-on and finds issues the deterministic rules don't know to look for.
+
+### Tactical actions
+
+Three of the deterministic findings have an unambiguous local fix and can be applied via the doctor command. Each flag defaults to dry-run preview; pass `--apply` to turn preview into a write. Tactical writes go directly to `state.db` via SQLite WAL — there is no `state.db.bak` because partial-file backup of a live SQLite DB can capture a mid-transaction state. The operator's existing `state.db` backup regime is the contract for recovery.
+
+The human report prints a `fix: <flag> [--apply]` line directly under every fired finding, so the operator sees the remediation next to the evidence:
+
+```
+⚠ [ALERT] compression_stale_locks           1 stale compression lock(s) — likely crashed compressor process(es)
+           first stale lock: s1
+           fix: --prune-stale-locks [--apply]
+
+⚠ [ALERT] zombie_sessions                   1 zombie session(s) older than 24h
+           first flagged session: z1
+           fix: --close-zombies [--apply]
+```
+
+JSON consumers see the same hint under `per_detector[i].remediation`. The hint text starts with `--` when it's a doctor tactical flag (paste it onto your existing `talaria hermes doctor …` command line) or with the full sibling-command name (e.g. `talaria skills prune …`) when the remediation lives in a different process — never both. Non-tactical findings (truncation, stream drops, compression failures, rewinds, handoff errors, cost anomalies, free-flight anomalies, free-flight config_suggestions) carry `remediation: null` because they have no local fix — they need human context.
+
+The skill_index_drift detector's remediation is `talaria skills prune` (a separate command, not a doctor flag) because skill removal needs its own backup contract and lock-file consistency guarantees. The hint makes this explicit so the operator cannot mistake it for a doctor flag:
+
+```
+⚠ [ALERT] skill_index_drift                 3 drift name(s) across filesystem, lock, and disabled policy
+           first drift class: filesystem_only
+           fix: talaria skills prune --prune-filesystem-only --prune-lock-only --prune-disabled-orphans --apply
+```
+
+```bash
+# Preview what stale locks would be dropped
+talaria hermes doctor --prune-stale-locks
+
+# Actually prune them (preview → write)
+talaria hermes doctor --prune-stale-locks --apply
+
+# Combine: preview every tactical action in one pass
+talaria hermes doctor --prune-stale-locks --close-zombies --prune-ghost-sessions
+
+# Combine + apply
+talaria hermes doctor --prune-stale-locks --close-zombies --prune-ghost-sessions --apply
+```
+
+| Flag | Fixes | What it does |
+|------|-------|--------------|
+| `--prune-stale-locks` | `compression_stale_locks` | Deletes every row in `compression_locks` whose `expires_at` is in the past. Stale locks block the next compressor run. |
+| `--close-zombies` | `zombie_sessions` | Sets `ended_at = now` on sessions whose `started_at` is older than 24 h and whose `ended_at IS NULL`. Session rows are preserved (only `ended_at` is written) so the crash audit trail survives. |
+| `--prune-ghost-sessions` | `ghost_sessions` | Deletes sessions within the look-back window that have zero `messages` rows. Out-of-window ghosts are diagnostic-only and never auto-deleted. |
+| `--apply` | gate | Turns every selected tactical flag from dry-run preview into a write. A no-op when no tactical flag is set. |
+
+The other eight findings (truncation, stream drops, compression failures, rewinds, handoff errors, cost anomalies, and free-flight anomalies) stay diagnostic because they need human context to fix correctly. (skill_index_drift has a remediation too — see the example above — but the remediation lives in `talaria skills prune`, not in the doctor's tactical layer.)
 
 ## Feature: `talaria hermes benchmark`
 
