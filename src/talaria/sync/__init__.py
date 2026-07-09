@@ -30,6 +30,7 @@ from talaria.sync.paths import (
     resolve_profile,
 )
 from talaria.sync.result import (
+    AuthTokensPhaseResult,
     ConfigPhaseResult,
     FilePhaseResult,
     PhaseResult,
@@ -47,6 +48,7 @@ __all__ = [
     "PhaseResult",
     "ConfigPhaseResult",
     "FilePhaseResult",
+    "AuthTokensPhaseResult",
     "SkillsPhaseResult",
     "list_profiles",
     "mcp_serve_entry",

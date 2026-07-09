@@ -77,6 +77,23 @@ class FilePhaseResult(PhaseResult):
 
 
 @dataclass
+class AuthTokensPhaseResult(PhaseResult):
+    """Result of the ``auth.json`` OAuth token sync phase.
+
+    The phase scans every profile's ``auth.json`` for the newest
+    token per provider, then writes those into the target.
+    ``updated_providers`` / ``new_providers`` decompose the changes
+    by provider name; ``source_profiles`` lists which profiles
+    contributed a newest token.
+    """
+
+    backup_path: Path | None = None
+    updated_providers: list[str] = field(default_factory=list)
+    new_providers: list[str] = field(default_factory=list)
+    source_profiles: list[str] = field(default_factory=list)
+
+
+@dataclass
 class SkillsPhaseResult(PhaseResult):
     """Result of the ``skills/`` directory-tree sync phase.
 
@@ -110,6 +127,7 @@ class SyncReport:
     skills: SkillsPhaseResult | None = None
     env: FilePhaseResult | None = None
     context_cache: FilePhaseResult | None = None
+    auth_tokens: AuthTokensPhaseResult | None = None
     mcp_serve: PhaseResult | None = None
     error: str | None = None
 
@@ -137,5 +155,6 @@ class SyncReport:
             self.skills,
             self.env,
             self.context_cache,
+            self.auth_tokens,
             self.mcp_serve,
         ]

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from talaria.sync.result import (
+    AuthTokensPhaseResult,
     ConfigPhaseResult,
     FilePhaseResult,
     PhaseResult,
@@ -113,7 +114,7 @@ def _report_to_dict(report: SyncReport) -> dict[str, Any]:
         "ok": report.ok,
         "any_writes": report.any_writes,
     }
-    for phase_name in ("config", "soul", "skills", "env", "context_cache", "mcp_serve"):
+    for phase_name in ("config", "soul", "skills", "env", "context_cache", "auth_tokens", "mcp_serve"):
         phase = getattr(report, phase_name)
         if phase is None:
             payload[phase_name] = None
@@ -136,6 +137,7 @@ def _iter_phases(report: SyncReport) -> list[PhaseResult | None]:
         report.skills,
         report.env,
         report.context_cache,
+        report.auth_tokens,
         report.mcp_serve,
     ]
 
@@ -173,6 +175,17 @@ def _render_phase_section(result: PhaseResult, *, verbose: bool) -> str:
         if verbose and result.skills_detail:
             for detail in result.skills_detail:
                 lines.append(f"    {detail}")
+
+    if isinstance(result, AuthTokensPhaseResult):
+        parts = []
+        if result.updated_providers:
+            parts.append(f"{len(result.updated_providers)} updated")
+        if result.new_providers:
+            parts.append(f"{len(result.new_providers)} new")
+        if parts:
+            lines.append(f"    {', '.join(parts)} provider(s)")
+        if verbose and result.source_profiles:
+            lines.append(f"    sources: {', '.join(result.source_profiles)}")
 
     if isinstance(result, FilePhaseResult) and verbose:
         for key in result.new_vars:
@@ -225,6 +238,8 @@ def _render_summary(report: SyncReport) -> str:
         bits.append(".env")
     if report.context_cache and report.context_cache.write_confirmed:
         bits.append("context_length_cache.yaml")
+    if report.auth_tokens and report.auth_tokens.write_confirmed:
+        bits.append("auth.json")
     if report.mcp_serve and report.mcp_serve.write_confirmed:
         bits.append("mcp_servers entry")
 

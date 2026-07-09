@@ -18,8 +18,9 @@ profiles.
   also hosts the sibling `apply-auxiliary` command (implemented in
   `talaria/hermos/auxiliary.py`, not here).
 - Each phase is a single module: `config.py`, `soul.py`,
-  `skills.py`, `env.py`, `context_cache.py`, `mcp_serve.py`. Phases
-  are independent and any subset can run via `--skip-*` flags.
+  `skills.py`, `env.py`, `context_cache.py`, `auth_tokens.py`,
+  `mcp_serve.py`. Phases are independent and any subset can run via
+  `--skip-*` flags.
 - `paths.py` resolves profile specs to `SyncProfile` objects. This
   is *not* the same as `talaria.paths` — sync needs paths to all
   artefacts, not just `state.db` and `logs/`.
@@ -44,7 +45,9 @@ profiles.
   phase modules are a code smell.
 - `.env` sync is **additive** (target values always win on
   conflict). `context_length_cache.yaml` is **source-wins**
-  (factual measurements presumed more recent). `config.yaml` mode
+  (factual measurements presumed more recent). `auth.json` is
+  **newest-token-wins** (scans all profiles, picks the most
+  recently refreshed token per provider). `config.yaml` mode
   follows the `--exclude` / `--only` flags.
 - Exit codes follow the talaria CLI contract: `0` clean, `2` tool
   error. The `1` "signal fired" exit is unused by sync — there is
@@ -75,8 +78,8 @@ profiles.
 ## Verification
 
 - `tests/test_sync.py` covers each phase (config, soul, skills,
-  env, context_cache, mcp_serve) with the `fake_hermes_root`
-  fixture plus a hand-built target tree.
+  env, context_cache, auth_tokens, mcp_serve) with the
+  `fake_hermes_root` fixture plus a hand-built target tree.
 - Tests assert on real exit codes (`0` / `2`), on
   `report.ok` / `report.any_writes`, and on `report.<phase>.status`.
 - JSON-mode tests assert against `_report_to_dict` keys (stable
@@ -96,6 +99,11 @@ profiles.
 - `env.py` — `.env` phase. Additive merge with target precedence.
 - `context_cache.py` — `context_length_cache.yaml` phase.
   Source-wins merge.
+- `auth_tokens.py` — `auth.json` OAuth token phase. Scans all
+  profiles for the newest token per provider (by `last_refresh` /
+  `obtained_at` timestamp), writes the winner into the target.
+  Preserves non-provider fields (`active_provider`,
+  `credential_pool`, etc.).
 - `mcp_serve.py` — `mcp_servers` injection (delegates to
   `config.py`). Writes an `mcp_servers:<name>` block into the
   target's `config.yaml` pointing at `http://<host>:<port>/sse`

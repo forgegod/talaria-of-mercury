@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from talaria.sync.auth_tokens import sync_auth_tokens
 from talaria.sync.config import sync_config
 from talaria.sync.context_cache import sync_context_cache
 from talaria.sync.env import sync_env
@@ -28,6 +29,7 @@ from talaria.sync.paths import (
     same_profile,
 )
 from talaria.sync.result import (
+    AuthTokensPhaseResult,
     ConfigPhaseResult,
     FilePhaseResult,
     PhaseResult,
@@ -63,6 +65,7 @@ class SyncOptions:
     skip_skills: bool = False
     skip_env: bool = False
     skip_cache: bool = False
+    skip_auth: bool = False
     force_config: bool = False
 
 
@@ -147,6 +150,14 @@ def run_sync(
 
     if not options.skip_cache:
         report.context_cache = sync_context_cache(
+            source,
+            target,
+            apply=apply,
+            no_backup=options.no_backup,
+        )
+
+    if not options.skip_auth:
+        report.auth_tokens = sync_auth_tokens(
             source,
             target,
             apply=apply,

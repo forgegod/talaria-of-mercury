@@ -33,6 +33,7 @@ from talaria.sync import (
 from talaria.sync.config import sync_config
 from talaria.sync.context_cache import sync_context_cache
 from talaria.sync.env import sync_env
+from talaria.sync.auth_tokens import sync_auth_tokens
 from talaria.sync.skills import sync_skills
 from talaria.sync.soul import sync_soul
 from talaria.sync.dotpath import (
@@ -552,6 +553,177 @@ class TestContextCachePhase:
         assert (target_dir / "context_length_cache.yaml").exists()
 
 
+# ---------- auth_tokens phase ----------
+def _make_auth(profile_dir: Path, providers: dict, *, updated_at: str = "") -> Path:
+    """Write a minimal auth.json into *profile_dir* and return its path."""
+    data = {"version": 1, "providers": providers}
+    if updated_at:
+        data["updated_at"] = updated_at
+    auth_path = profile_dir / "auth.json"
+    auth_path.write_text(json.dumps(data, indent=2))
+    return auth_path
+
+
+class TestAuthTokensPhase:
+    def test_propagates_newer_token_from_other_profile(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        # dst has an old token
+        _make_auth(dst_dir, {
+            "nous": {"access_token": "old-token", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        # src has a newer token
+        _make_auth(src_dir, {
+            "nous": {"access_token": "new-token", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert result.status == "updated"
+        assert result.write_confirmed is True
+        assert "nous" in result.updated_providers
+        merged = json.loads((dst_dir / "auth.json").read_text())
+        assert merged["providers"]["nous"]["access_token"] == "new-token"
+
+    def test_keeps_target_when_target_is_newest(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(src_dir, {
+            "nous": {"access_token": "old-token", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        _make_auth(dst_dir, {
+            "nous": {"access_token": "new-token", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert result.status == "in_sync"
+        assert result.write_confirmed is False
+        merged = json.loads((dst_dir / "auth.json").read_text())
+        assert merged["providers"]["nous"]["access_token"] == "new-token"
+
+    def test_picks_newest_across_three_profiles(self, tmp_path: Path) -> None:
+        a_dir = _make_profile(tmp_path, "alpha")
+        b_dir = _make_profile(tmp_path, "bravo")
+        c_dir = _make_profile(tmp_path, "charlie")
+        _make_auth(a_dir, {
+            "nous": {"access_token": "a-token", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        _make_auth(b_dir, {
+            "nous": {"access_token": "b-token", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        _make_auth(c_dir, {
+            "nous": {"access_token": "c-token", "obtained_at": "2025-03-01T00:00:00Z"},
+        })
+        src = resolve_profile("alpha", root=tmp_path / HERMES)
+        tgt = resolve_profile("charlie", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert result.status == "updated"
+        merged = json.loads((c_dir / "auth.json").read_text())
+        assert merged["providers"]["nous"]["access_token"] == "b-token"
+
+    def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(dst_dir, {
+            "nous": {"access_token": "old-token", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        _make_auth(src_dir, {
+            "nous": {"access_token": "new-token", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        original = (dst_dir / "auth.json").read_text()
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=False, root=tmp_path / HERMES)
+        assert result.write_confirmed is False
+        assert (dst_dir / "auth.json").read_text() == original
+
+    def test_skips_when_no_auth_anywhere(self, tmp_path: Path) -> None:
+        _make_profile(tmp_path, "src")
+        _make_profile(tmp_path, "dst")
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert result.status == "skipped"
+
+    def test_preserves_non_provider_fields(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(src_dir, {
+            "nous": {"access_token": "new", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        (dst_dir / "auth.json").write_text(json.dumps({
+            "version": 1,
+            "providers": {
+                "nous": {"access_token": "old", "obtained_at": "2025-01-01T00:00:00Z"},
+            },
+            "active_provider": "nous",
+            "credential_pool": {"openrouter": []},
+        }, indent=2))
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert result.write_confirmed is True
+        merged = json.loads((dst_dir / "auth.json").read_text())
+        assert merged["active_provider"] == "nous"
+        assert merged["credential_pool"] == {"openrouter": []}
+        assert merged["providers"]["nous"]["access_token"] == "new"
+
+    def test_uses_last_refresh_for_openai_codex(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(dst_dir, {
+            "openai-codex": {
+                "tokens": {"access_token": "old", "refresh_token": "r1"},
+                "last_refresh": "2025-01-01T00:00:00Z",
+                "auth_mode": "device_code",
+            },
+        })
+        _make_auth(src_dir, {
+            "openai-codex": {
+                "tokens": {"access_token": "new", "refresh_token": "r2"},
+                "last_refresh": "2025-06-01T00:00:00Z",
+                "auth_mode": "device_code",
+            },
+        })
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, root=tmp_path / HERMES)
+        assert "openai-codex" in result.updated_providers
+        merged = json.loads((dst_dir / "auth.json").read_text())
+        assert merged["providers"]["openai-codex"]["tokens"]["access_token"] == "new"
+
+    def test_backup_created(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(dst_dir, {
+            "nous": {"access_token": "old", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        _make_auth(src_dir, {
+            "nous": {"access_token": "new", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, no_backup=False, root=tmp_path / HERMES)
+        assert result.backup_path is not None
+        assert (dst_dir / "auth.json.bak").exists()
+
+    def test_no_backup_when_requested(self, tmp_path: Path) -> None:
+        src_dir = _make_profile(tmp_path, "src")
+        dst_dir = _make_profile(tmp_path, "dst")
+        _make_auth(dst_dir, {
+            "nous": {"access_token": "old", "obtained_at": "2025-01-01T00:00:00Z"},
+        })
+        _make_auth(src_dir, {
+            "nous": {"access_token": "new", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
+        src = resolve_profile("src", root=tmp_path / HERMES)
+        tgt = resolve_profile("dst", root=tmp_path / HERMES)
+        result = sync_auth_tokens(src, tgt, apply=True, no_backup=True, root=tmp_path / HERMES)
+        assert result.backup_path is None
+        assert not (dst_dir / "auth.json.bak").exists()
+
+
 # ---------- run_sync integration ----------
 class TestRunSync:
     def _full_setup(self, tmp_path: Path) -> tuple[Path, Path]:
@@ -564,6 +736,9 @@ class TestRunSync:
         (src / "context_length_cache.yaml").write_text(
             dump_yaml({"context_lengths": {"m": 32000}})
         )
+        _make_auth(src, {
+            "nous": {"access_token": "tok", "obtained_at": "2025-06-01T00:00:00Z"},
+        })
         skill = src / "skills" / "github" / "demo"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text("# demo\n")
@@ -587,6 +762,7 @@ class TestRunSync:
         assert report.skills is not None and report.skills.write_confirmed
         assert report.env is not None and report.env.write_confirmed
         assert report.context_cache is not None and report.context_cache.write_confirmed
+        assert report.auth_tokens is not None and report.auth_tokens.write_confirmed
 
     def test_skip_flags(self, tmp_path: Path) -> None:
         src_dir, dst_dir = self._full_setup(tmp_path)
@@ -599,6 +775,7 @@ class TestRunSync:
             skip_skills=True,
             skip_env=True,
             skip_cache=True,
+            skip_auth=True,
         )
         report = run_sync(
             resolve_profile("src", root=tmp_path / HERMES),
@@ -609,6 +786,7 @@ class TestRunSync:
         assert report.skills is None
         assert report.env is None
         assert report.context_cache is None
+        assert report.auth_tokens is None
         # config still ran (the excludes flag kept it active)
         assert report.config is not None
 
@@ -662,7 +840,7 @@ class TestSyncCLI:
         # --exclude triggers the config phase; --dry-run must NOT write.
         result = self._cli(
             "src", "dst", "-e", "model", "--dry-run",
-            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
             env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0
@@ -673,7 +851,7 @@ class TestSyncCLI:
         _make_profile(tmp_path, "dst")
         result = self._cli(
             "src", "dst", "-e", "model", "--json", "--force-config",
-            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
             env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0
@@ -692,7 +870,7 @@ class TestSyncCLI:
         _make_profile(tmp_path, "dst")
         result = self._cli(
             "src", "dst", "-e", "model", "--force-config",
-            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
             env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0
@@ -706,7 +884,7 @@ class TestSyncCLI:
         _make_profile(tmp_path, "dst")
         result = self._cli(
             "src", "dst", "-e", "model", "--force-config", "--verbose",
-            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
             env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0
@@ -725,7 +903,7 @@ class TestSyncCLI:
         (target_dir / "config.yaml").write_text(dump_yaml({"model": {"name": "dst"}, "agent": {"x": 9}}))
         result = self._cli(
             "src", "dst", "-e", "model.name", "--force-config",
-            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
             env={"HOME": str(tmp_path)},
         )
         assert result.returncode == 0

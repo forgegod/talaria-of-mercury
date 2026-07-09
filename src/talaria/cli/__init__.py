@@ -373,6 +373,7 @@ def _build_sync_options(args: argparse.Namespace) -> SyncOptions:
         skip_skills=args.skip_skills,
         skip_env=args.skip_env,
         skip_cache=args.skip_cache,
+        skip_auth=args.skip_auth,
         force_config=args.force_config,
     )
 
@@ -1324,8 +1325,9 @@ def build_parser() -> argparse.ArgumentParser:
         "sync",
         help="Copy Hermes profile artefacts from source to target.",
         description=(
-            "Sync config.yaml, SOUL.md, skills/, .env, and "
-            "context_length_cache.yaml between two Hermes profiles. "
+            "Sync config.yaml, SOUL.md, skills/, .env, "
+            "context_length_cache.yaml, and auth.json (OAuth tokens) "
+            "between two Hermes profiles. "
             "By default every phase runs and writes to the target; "
             "use --dry-run to preview, --skip-* to omit a phase, "
             "--exclude/--only to filter config.yaml paths, and "
@@ -1351,6 +1353,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Skip the .env phase.")
     p_sync.add_argument("--skip-cache", action="store_true",
                         help="Skip the context_length_cache.yaml phase.")
+    p_sync.add_argument("--skip-auth", action="store_true",
+                        help="Skip the auth.json OAuth token sync phase.")
     # config.yaml filtering
     p_sync.add_argument("-e", "--exclude", nargs="+", default=[], metavar="PATH",
                         help="Dot-notation paths to exclude from source. "

@@ -16,7 +16,7 @@ Talaria gives Hermes operators a single installable CLI for everything the agent
 - 📊 **Benchmark every model** — per-model health, cost, latency, reasoning level, and capabilities (vision, tool-call, structured-output, context/output limits, per-token cost) for every `(model, provider)` pair the profile routes through. Combines `state.db` session aggregation, `models.dev` capability data, and cached JSON smoke calls — one deduplicated call per unique pair, not per config reference.
 - 👁️ **Verify vision capability** — the benchmark automatically sends real images to every vision-capable model (per models.dev) and asserts the model reads them correctly: counting, OCR, spatial reasoning, and brand-logo recognition. `--no-vision` disables the checks.
 - 🧩 **Manage skills at scale** — recursively install, categorize, and uninstall third-party skill collections from GitHub or skills.sh, with collision detection and fuzzy similarity matching to prevent silent overwrites.
-- 🔄 **Keep profiles in sync** — copy config, SOUL.md, skills, `.env`, and context cache between profiles; refresh `.env` values from the live environment; derive model aliases from auxiliary pins.
+- 🔄 **Keep profiles in sync** — copy config, SOUL.md, skills, `.env`, context cache, and OAuth tokens between profiles; refresh `.env` values from the live environment; derive model aliases from auxiliary pins.
 - 🗂️ **Refresh model catalogs** — fetch and reshape gateway-backed model manifests into Hermes' provider cache.
 - 🛑 **Stop runaway backends** — detect and gracefully terminate Hermes dashboard/serve processes by port (not cmdline pattern).
 - 🌀 **Bound log directories** — rotate active logs (copy → gzip → truncate), prune rotated copies and curator snapshots by age and aggregate size, and sweep every profile with `--all-profiles`.
@@ -38,7 +38,7 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria skills install` | skills | Install skill(s) under an identifier (recursive if `/*`) with category and enable policy. |
 | `talaria skills uninstall` | skills | Uninstall skill(s) under an identifier and clean up `skills.disabled`. |
 | `talaria skills create-category` | skills | Create a skill category directory with an optional description. |
-| `talaria config sync` | config | Copy config.yaml, SOUL.md, skills/, .env, context cache between profiles. |
+| `talaria config sync` | config | Copy config.yaml, SOUL.md, skills/, .env, context cache, and auth.json (OAuth tokens) between profiles. |
 | `talaria config apply-auxiliary` | config | Derive `model.aliases._<usecase>` from a profile's `auxiliary` block. |
 | `talaria config sync-env` | config | Refresh a profile's `.env` values from the live environment. |
 
@@ -159,6 +159,9 @@ talaria skills uninstall 'skills-sh/addyosmani/agent-skills/*'
 
 # Sync config from default to a working profile
 talaria config sync default hermes-vc
+
+# Sync everything except auth.json (skip the OAuth token phase)
+talaria config sync default hermes-vc --skip-auth
 
 # Refresh .env values from the live environment
 talaria config sync-env --profile hermes-vc
@@ -588,7 +591,7 @@ Category names must match Hermes' regex: `^[a-z][a-z0-9_/-]*$` (lowercase letter
 
 ## Feature: `talaria config sync`
 
-Copy Hermes profile artefacts (config.yaml, SOUL.md, skills/, .env, context_length_cache.yaml) from one profile to another. **sync is the write-bearing command** — every other Talaria command is read-only against the Hermes runtime. sync never touches `state.db` or rotates logs.
+Copy Hermes profile artefacts (config.yaml, SOUL.md, skills/, .env, context_length_cache.yaml, and auth.json) from one profile to another. **sync is the write-bearing command** — every other Talaria command is read-only against the Hermes runtime. sync never touches `state.db` or rotates logs.
 
 ### Usage
 
@@ -626,6 +629,7 @@ talaria config sync default --list
 | `--skip-skills` | off | Skip the `skills/` phase. |
 | `--skip-env` | off | Skip the `.env` phase. |
 | `--skip-cache` | off | Skip the `context_length_cache.yaml` phase. |
+| `--skip-auth` | off | Skip the `auth.json` OAuth token sync phase. |
 | `-e`, `--exclude` | none | Dot-notation paths to exclude from source. |
 | `-o`, `--only` | none | Copy only these paths. Mutually exclusive with `-e`. |
 | `--sync-skills` | all | Limit skills sync to categories or `category/skill-name` paths. |
@@ -649,6 +653,7 @@ Each phase is independent and any subset runs together:
 3. **skills/** — byte-level tree comparison. New and differing skills are copied; `--sync-skills` filters by category or `category/skill-name`.
 4. **.env** — additive merge. New variables appended; existing target values never overwritten.
 5. **context_length_cache.yaml** — source-wins merge (factual measurements presumed more recent). Target-only entries preserved.
+6. **auth.json** — newest-token-wins. Scans every profile's `auth.json` for the most recently refreshed token per provider (by `last_refresh` / `obtained_at` timestamp), then writes the winner into the target. Non-provider fields (`active_provider`, `credential_pool`, etc.) are preserved.
 
 ## Feature: `talaria config apply-auxiliary`
 

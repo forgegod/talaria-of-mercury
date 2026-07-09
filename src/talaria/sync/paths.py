@@ -78,6 +78,12 @@ class SyncProfile:
     context_cache: Path
     """:class:`~pathlib.Path` to ``context_length_cache.yaml``."""
 
+    auth_file: Path
+    """:class:`~pathlib.Path` to ``auth.json`` (``<root>/auth.json``).
+    Contains OAuth tokens for providers (nous, openai-codex, etc.)
+    and the credential pool. Synced by the ``auth_tokens`` phase
+    using newest-token-wins per provider."""
+
     @property
     def is_default(self) -> bool:
         """:class:`bool` -- whether this is the default profile."""
@@ -183,6 +189,7 @@ def _build(name: str, root: Path) -> SyncProfile:
         skills_dir=root / "skills",
         env_file=root / ".env",
         context_cache=root / "context_length_cache.yaml",
+        auth_file=root / "auth.json",
     )
 
 
