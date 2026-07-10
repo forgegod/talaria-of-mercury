@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # ---------- TestCollect ----------
 
 class TestCollect:
-    def test_root_has_four_top_level_subcommands(self) -> None:
+    def test_root_has_five_top_level_subcommands(self) -> None:
         root = completion.collect(build_parser())
         names = sorted(s.name for s in root.subcommands)
         assert names == ["completion", "config", "hermes", "paths", "skills"]
@@ -56,6 +56,25 @@ class TestCollect:
         skills = next(s for s in root.subcommands if s.name == "skills")
         names = {s.name for s in skills.subcommands}
         assert names == {"install", "uninstall", "create-category", "prune"}
+
+    def test_latest_extension_flags_are_collected(self) -> None:
+        root = completion.collect(build_parser())
+        doctor = self._find(root, ["hermes", "doctor"])
+        sync = self._find(root, ["config", "sync"])
+        assert doctor is not None
+        assert sync is not None
+
+        doctor_flags = {flag for option in doctor.options for flag in option.flags}
+        assert {
+            "--apply-curator-suggestions",
+            "--prune-stale-locks",
+            "--close-zombies",
+            "--prune-ghost-sessions",
+            "--apply",
+        } <= doctor_flags
+
+        sync_flags = {flag for option in sync.options for flag in option.flags}
+        assert "--skip-auth" in sync_flags
 
     def test_leaf_subcommand_has_options(self) -> None:
         root = completion.collect(build_parser())
@@ -110,12 +129,26 @@ class TestBash:
 
     def test_contains_all_top_level_subcommands(self) -> None:
         script = self.render()
-        for name in ["paths", "hermes", "config", "completion"]:
+        for name in ["paths", "completion", "hermes", "skills", "config"]:
             assert name in script
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["doctor", "benchmark", "refresh-catalog", "sync-env", "apply-auxiliary"]:
+        for name in [
+            "doctor",
+            "benchmark",
+            "refresh-catalog",
+            "fix-context-cache",
+            "serve-stop",
+            "log-rotate",
+            "install",
+            "uninstall",
+            "create-category",
+            "prune",
+            "sync",
+            "apply-auxiliary",
+            "sync-env",
+        ]:
             assert name in script
 
     def test_contains_option_flags(self) -> None:
@@ -123,6 +156,18 @@ class TestBash:
         assert "--json" in script
         assert "--profile" in script
         assert "--dry-run" in script
+
+    def test_contains_latest_extension_flags(self) -> None:
+        script = self.render()
+        for flag in [
+            "--apply-curator-suggestions",
+            "--prune-stale-locks",
+            "--close-zombies",
+            "--prune-ghost-sessions",
+            "--apply",
+            "--skip-auth",
+        ]:
+            assert flag in script
 
     def test_multi_word_paths_are_quoted(self) -> None:
         script = self.render()
@@ -214,13 +259,27 @@ class TestZsh:
     def test_contains_all_top_level_subcommands(self) -> None:
         script = self.render()
         # Each top-level subcommand appears in the cmds=() declaration
-        for name in ["paths", "hermes", "config", "completion"]:
+        for name in ["paths", "completion", "hermes", "skills", "config"]:
             assert name in script
         assert "cmds=(" in script
 
     def test_contains_nested_subcommands(self) -> None:
         script = self.render()
-        for name in ["doctor", "benchmark", "refresh-catalog", "sync-env", "serve-stop"]:
+        for name in [
+            "doctor",
+            "benchmark",
+            "refresh-catalog",
+            "fix-context-cache",
+            "serve-stop",
+            "log-rotate",
+            "install",
+            "uninstall",
+            "create-category",
+            "prune",
+            "sync",
+            "apply-auxiliary",
+            "sync-env",
+        ]:
             assert name in script
 
     def test_contains_option_specs(self) -> None:
@@ -228,6 +287,18 @@ class TestZsh:
         assert "'--json" in script
         assert "'--profile" in script
         assert "'--dry-run" in script
+
+    def test_contains_latest_extension_specs(self) -> None:
+        script = self.render()
+        for flag in [
+            "--apply-curator-suggestions",
+            "--prune-stale-locks",
+            "--close-zombies",
+            "--prune-ghost-sessions",
+            "--apply",
+            "--skip-auth",
+        ]:
+            assert f"'{flag}" in script
 
     def test_takes_arg_options_have_value_placeholder(self) -> None:
         script = self.render()
