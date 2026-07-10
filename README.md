@@ -32,7 +32,6 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria hermes doctor` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
 | `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. Parallel subprocess execution (`--jobs`). |
 | `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
-| `talaria hermes fix-context-cache` | maintenance | Repair curated known-bad entries in a profile's context cache. |
 | `talaria hermes serve-stop` | maintenance | Detect and stop the Hermes dashboard/serve backend by port. |
 | `talaria hermes log-rotate` | maintenance | Rotate active logs (copy→gzip→truncate) and prune rotated copies + curator snapshots by age / aggregate size. |
 | `talaria skills install` | skills | Install skill(s) under an identifier (recursive if `/*`) with category and enable policy. |
@@ -94,8 +93,8 @@ remaining useful interactively.
 
 **Silent by default, opt-in to print** — most commands are exit-code-only
 when run without flags. `--verbose` (`-v`) prints the human-readable report.
-This is the pattern for: `hermes refresh-catalog`, `hermes fix-context-cache`,
-`hermes serve-stop`, `skills install`, `skills uninstall`, `skills create-category`,
+This is the pattern for: `hermes refresh-catalog`, `hermes serve-stop`,
+`skills install`, `skills uninstall`, `skills create-category`,
 `config sync`, `config apply-auxiliary`, `config sync-env`.
 
 **Print by default, opt-out to suppress** — inspection commands whose report
@@ -368,31 +367,6 @@ talaria hermes refresh-catalog --dst /tmp/kilocode.json --json
 Three steps: fetch the live catalog, reshape into the Hermes manifest schema (normalising pricing to per-million-token values), and atomic-write to the destination via a sibling temp file + `os.replace`.
 
 Exit code `2` with `reason: "auth" | "network" | "parse" | "write"` disambiguates failure modes. No `1` exit — there is no alert condition, only success vs. tool error.
-
-## Feature: `talaria hermes fix-context-cache`
-
-Repairs curated known-bad entries in a profile's `context_length_cache.yaml` — model context windows that Hermes has been known to cache incorrectly. Uses Talaria's curated fix table and preserves unrelated cache entries.
-
-### Usage
-
-```bash
-talaria hermes fix-context-cache
-talaria hermes fix-context-cache --profile hermes-vc
-talaria hermes fix-context-cache --dry-run
-```
-
-### Flags
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--profile NAME` | active | Profile whose context cache should be repaired. |
-| `--cache-path PATH` | resolved | Explicit cache path (overrides `--profile`). |
-| `--only-existing` | off | Only update existing bad entries; do not insert missing known-fix keys. |
-| `--dry-run` | off | Preview repairs without writing. |
-| `--no-backup` | off | Skip `.bak` backup before overwriting. |
-| `--json` | off | Emit JSON instead of human-readable output. |
-| `--show-resolution` | off | Print the resolved cache path and known-fix table, then exit. |
-| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
 ## Feature: `talaria hermes serve-stop`
 

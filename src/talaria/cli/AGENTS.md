@@ -109,8 +109,6 @@ Console-script entry point and argparse dispatch for the `talaria` command.
 - Profile-agnostic features (e.g. `talaria hermes refresh-catalog`) still
   call `resolve_paths()` for dispatcher shape symmetry, but the resolved
   profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.
-- Profile-scoped write features (e.g. `talaria hermes fix-context-cache`)
-  must expose `--dry-run`, `--no-backup`, `--json`, and `--show-resolution`.
 - `talaria skills` is a top-level command group (sibling to `paths`,
   `hermes`, `config`) with `install`, `uninstall`, `create-category`,
   and `prune` subcommands. The first three expand a skill identifier

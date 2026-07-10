@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from talaria.hermos import (
     auxiliary,
-    context_cache_fix,
     doctor,
     log_rotate,
     refresh_catalog,
@@ -20,7 +19,6 @@ from talaria.hermos import (
 
 __all__ = [
     "auxiliary",
-    "context_cache_fix",
     "doctor",
     "log_rotate",
     "refresh_catalog",

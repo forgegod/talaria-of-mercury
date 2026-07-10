@@ -221,32 +221,6 @@ def cmd_hermes_refresh_catalog(args: argparse.Namespace) -> int:
         return exit_code
     return 0 if report["ok"] else 2
 
-# ---------- Subcommand: talaria hermes fix-context-cache ----------
-def cmd_hermes_fix_context_cache(args: argparse.Namespace) -> int:
-    from talaria.hermos import context_cache_fix
-
-    paths = resolve_paths(profile_flag=args.profile)
-    cache_path = Path(args.cache_path) if args.cache_path else None
-    if args.show_resolution:
-        print(context_cache_fix.show_resolution(paths, cache_path=cache_path))
-        return 0
-    report = context_cache_fix.run(
-        paths,
-        cache_path=cache_path,
-        apply=not args.dry_run,
-        no_backup=args.no_backup,
-        create_missing=not args.only_existing,
-    )
-    if args.json:
-        _print_json(report)
-        return 0 if report["ok"] else 2
-    if args.verbose:
-        exit_code, text = context_cache_fix.render_human(report)
-        print(text)
-        return exit_code
-    return 0 if report["ok"] else 2
-
-
 # ---------- Subcommand: talaria hermes skills install ----------
 def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
     from talaria.hermos import skill_install
@@ -954,48 +928,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the human-readable report on stdout (default: silent, exit code only).",
     )
     p_catalog.set_defaults(func=cmd_hermes_refresh_catalog)
-
-    # talaria hermes fix-context-cache
-    p_context = hermes_sub.add_parser(
-        "fix-context-cache",
-        help="Repair known-bad Hermes context_length_cache.yaml entries.",
-        description=(
-            "Update the selected profile's context_length_cache.yaml with "
-            "Talaria's curated fixes for model context windows that Hermes "
-            "has been known to cache incorrectly."
-        ),
-    )
-    p_context.add_argument(
-        "--profile", help="Hermes profile whose context cache should be repaired.",
-    )
-    p_context.add_argument(
-        "--cache-path", type=Path, default=None,
-        help="Explicit context_length_cache.yaml path (overrides --profile resolution).",
-    )
-    p_context.add_argument(
-        "--only-existing", action="store_true",
-        help="Only update existing bad entries; do not insert missing known-fix keys.",
-    )
-    p_context.add_argument(
-        "--dry-run", action="store_true",
-        help="Preview repairs without writing.",
-    )
-    p_context.add_argument(
-        "--no-backup", action="store_true",
-        help="Skip .bak backup before overwriting.",
-    )
-    p_context.add_argument(
-        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
-    )
-    p_context.add_argument(
-        "--show-resolution", action="store_true",
-        help="Print the resolved cache path and known-fix table, then exit.",
-    )
-    p_context.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Print the human-readable report on stdout (default: silent, exit code only).",
-    )
-    p_context.set_defaults(func=cmd_hermes_fix_context_cache)
 
     # talaria hermes serve-stop
     p_serve_stop = hermes_sub.add_parser(

@@ -7,8 +7,7 @@ Pytest suite for the Talaria CLI and library.
 ## Ownership
 
 - One test module per feature: `test_paths.py` for path resolution,
-  `test_refresh_catalog.py`,
-  `test_context_cache_fix.py`, `test_auxiliary.py`, `test_sync.py`,
+  `test_refresh_catalog.py`, `test_auxiliary.py`, `test_sync.py`,
   and `test_doctor.py` for feature coverage. `test_skill_install.py`
   covers recursive skill install orchestration.
   `test_skill_index.py` covers the read-side skill-index reader
@@ -83,8 +82,6 @@ Pytest suite for the Talaria CLI and library.
   `talaria paths` CLI dispatch (default-prints contract).
 - `test_refresh_catalog.py` — reshape, credential discovery, cache
   freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.
-- `test_context_cache_fix.py` — curated context-length cache repairs,
-  backups, dry-run behaviour, and CLI profile/path resolution.
 - `test_auxiliary.py` — single-profile auxiliary-alias derivation:
   injection, sentinel skipping, preservation, no-op, idempotency,
   dry-run, profile path resolution, CLI flags.

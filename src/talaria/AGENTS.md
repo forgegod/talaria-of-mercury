@@ -43,8 +43,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   `talaria config sync-env` refreshes a profile's `.env` values from the
   live environment and can optionally extend the variable scope
   (`--add-key`, `--skip-key`, `--disable-key`, `--enable-key`),
-  `talaria hermes fix-context-cache` repairs `context_length_cache.yaml`
-  in one profile, `talaria hermes log-rotate` rotates and prunes the
+  `talaria hermes log-rotate` rotates and prunes the
   active profile's `logs/` (and every profile's `logs/` with
   `--all-profiles`) per age and per-file/total size caps, and
   `talaria skills install` / `talaria skills uninstall` install or
@@ -76,8 +75,8 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Child DOX Index
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
-- `hermos/` — Hermes features: inspections, catalog refresh, explicit
-  context-cache repair, skill install/uninstall orchestration, and
+- `hermos/` — Hermes features: inspections, catalog refresh,
+  skill install/uninstall orchestration, and
   single-profile auxiliary-alias derivation (`talaria config apply-auxiliary`).
 - `sync/` — Hermes sync feature group (the write-bearing group behind
   `talaria config sync`; copies profile artefacts between profiles).

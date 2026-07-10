@@ -56,9 +56,6 @@ caches.
   catalog is fetched and which provider manifest is written (currently
   only `kilocode`). Do not add `--profile` filtering, per-profile
   caches, or any logic that treats this feature as a state.db/logs consumer.
-- `context_cache_fix` is profile-scoped by design — it repairs only the
-  selected profile's `context_length_cache.yaml` using a curated fix table
-  and preserves unrelated cache entries.
 - `auxiliary` is profile-scoped by design — it derives
   `model.aliases._<usecase>` entries from the selected profile's own
   `auxiliary.<usecase>.model` block and writes them back into the same
@@ -253,9 +250,7 @@ caches.
   detector result).
 - `doctor.apply_config_suggestions()` reuses the
   :func:`talaria.sync.writer.write_with_backup` atomic backup
-  writer (the same primitive :mod:`talaria.hermos.auxiliary` and
-  :mod:`talaria.hermos.context_cache_fix` use) plus
-  :mod:`talaria.sync.yaml_io` for safe YAML round-trip. Each
+  writer plus :mod:`talaria.sync.yaml_io` for safe YAML round-trip. Each
   `config_suggestion` finding is a `yaml_path = suggested_value`
   set; bad paths are captured as `skipped: [{yaml_path, reason}]`
   and never raise. `dry_run=True` reports a unified diff in
@@ -374,9 +369,6 @@ its findings (anomaly + config_suggestion) are emitted under the
   there is no alert condition — there is only "refresh succeeded" vs.
   "tool error". Exit code 2 covers all failure modes
   (auth/network/parse/write); the `reason` field disambiguates them.
-- `context_cache_fix` reports use `ok: bool` and `changed: bool`.
-  Writes must go through the same atomic backup writer used by sync.
-  `--dry-run` must not write a cache file or backup.
 - `skill_install` reports use `ok: bool`; recursive installs are disabled by
   default via `skills.disabled` unless `--force-enable` or `--enable` says
   otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
@@ -386,9 +378,8 @@ its findings (anomaly + config_suggestion) are emitted under the
   Hermes or write `config.yaml`. Partial failures still clean up the skills
   that uninstalled successfully; `ok` is False when any uninstall fails.
 - `auxiliary` reports use `ok: bool` and `changed: bool`. Writes go
-  through the same atomic backup writer used by sync and
-  `context_cache_fix`. `--dry-run` must not write a `config.yaml` or
-  backup. Usecases whose `model` is a "no override" sentinel
+  through the same atomic backup writer used by sync. `--dry-run` must not
+  write a `config.yaml` or backup. Usecases whose `model` is a "no override" sentinel
   (`auto`, `inherit`, `default`, ...) are skipped; existing
   operator-defined `model.aliases` keys are always preserved.
 - `serve_stop` reports use `ok: bool` and `reason` of
@@ -490,8 +481,6 @@ its findings (anomaly + config_suggestion) are emitted under the
   the top of the module.
 - Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`
   does the fetch + reshape + write path inside the Python CLI.
-- `context_cache_fix.KNOWN_CONTEXT_FIXES` must stay small and source-backed;
-  do not add speculative model windows.
 - Skill install/uninstall must delegate actual semantics to `hermes skills
   install` / `hermes skills uninstall`; do not vendor or copy Hermes' hub
   installer into Talaria. Note: `hermes skills uninstall` takes a skill
@@ -548,9 +537,6 @@ its findings (anomaly + config_suggestion) are emitted under the
 - `refresh_catalog` tests stub `urllib.request.urlopen` and run the full
   `run()` orchestrator against realistic upstream payloads. No real
   network is used.
-- `context_cache_fix` tests cover bad existing entries, missing-key
-  insertion, `--only-existing`, dry-run write suppression, and CLI profile
-  resolution.
 - `skill_install` tests cover GitHub tree expansion, default-disabled policy,
   selected enablement, force-enable, dry-run suppression, CLI flags, and
   `--category` forwarding (command construction, omission when empty,
@@ -656,8 +642,6 @@ its findings (anomaly + config_suggestion) are emitted under the
   (`fired=False`); the operator decides whether to act.
 - `refresh_catalog.py` — fetch + reshape the selected gateway catalog into
   the matching Hermes provider manifest cache. Profile-agnostic.
-- `context_cache_fix.py` — repair curated known-bad entries in a profile's
-  `context_length_cache.yaml` with atomic writes and backups.
 - `skill_install.py` — expand skill identifiers (recursive when ending in
   `/*`) and run per-skill Hermes installs, then update `skills.disabled`
   in profile config.

@@ -1180,9 +1180,7 @@ def apply_config_suggestions(
 ) -> dict[str, Any]:
     """Apply *suggestions* to the active profile's ``config.yaml``.
 
-    The function reuses the same primitive as
-    :mod:`talaria.hermos.auxiliary` and
-    :mod:`talaria.hermos.context_cache_fix`:
+    The function uses:
 
     * :func:`talaria.sync.yaml_io.load_yaml` to read the current
       config.
