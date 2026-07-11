@@ -43,9 +43,27 @@ Every command follows the same conventions: profile-aware path resolution, struc
 
 ## Install
 
+Install Talaria as a normal user-level application with an isolated environment:
+
 ```bash
-# from a clone of this repo (uv is the recommended tool — the repo
-# ships a uv.lock so the dependency resolution is reproducible)
+# from a clone of this repo
+uv tool install --from . talaria
+
+# update the installation after changing or pulling the local source
+uv tool install --force --from . talaria
+
+# uninstall
+uv tool uninstall talaria
+```
+
+`uv` installs the executable at `~/.local/bin/talaria`; ensure `~/.local/bin` is
+on `PATH`. The managed environment lives outside the repository, so activating
+the project virtual environment is not required.
+
+For development inside the repository:
+
+```bash
+# create the project environment from the repository's uv.lock
 uv sync
 
 # editable install with the dev extra (pytest + pytest-cov)
