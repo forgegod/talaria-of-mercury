@@ -579,7 +579,7 @@ talaria skills create-category preview --dry-run
 | `--show-resolution` | off | Print the resolved category directory and validation result, then exit. |
 | `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
-Category names must match Hermes' regex: `^[a-z][a-z0-9_/-]*$` (lowercase letters, digits, hyphens, underscores, slashes). Creating an existing category is a no-op on the directory; re-writing its `DESCRIPTION.md` goes through the atomic backup writer.
+Category names must match Hermes' regex: <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code> (lowercase letters, digits, hyphens, underscores, slashes). Creating an existing category is a no-op on the directory; re-writing its `DESCRIPTION.md` goes through the atomic backup writer.
 
 ## Feature: `talaria config sync`
 

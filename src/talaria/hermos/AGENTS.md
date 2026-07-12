@@ -67,7 +67,7 @@ caches.
   `hermes skills install --category` so skills land in
   `skills/<category>/<name>/` instead of the flat root. The category value
   is the literal directory name (e.g. `software-development`), not a display
-  name — Hermes' validation regex (`^[a-z][a-z0-9_/-]*$`) rejects uppercase.
+  name — Hermes' validation regex (<code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>) rejects uppercase.
 - `skill_uninstall` is profile-scoped by design — it mirrors `skill_install`:
   expand the identifier, invoke `hermes skills uninstall` for each child skill
   *name* (unlike install, uninstall takes a name, not an identifier), and
@@ -164,7 +164,7 @@ caches.
   `DESCRIPTION.md` whose frontmatter `description:` is rendered in the
   Hermes system prompt after the category name. Category names are the
   literal directory name (e.g. `software-development`, `mlops/training`),
-  validated against Hermes' regex `^[a-z][a-z0-9_/-]*$`. Creating a
+  validated against Hermes' regex <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>. Creating a
   category that already exists is a no-op on the directory; re-writing
   its `DESCRIPTION.md` goes through the atomic backup writer with an
   optional `.bak`. `--dry-run` must not create any directory or file.
@@ -432,7 +432,7 @@ its findings (anomaly + config_suggestion) are emitted under the
   `description_written: bool`. Writes go through the atomic backup
   writer. `--dry-run` must not create a directory or write
   `DESCRIPTION.md`. The category name must match Hermes' category regex
-  `^[a-z][a-z0-9_/-]*$`; invalid names raise `SkillCategoryError`.
+  <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>; invalid names raise `SkillCategoryError`.
 - `skill_install` reports include `name_collisions` — a dict mapping
   colliding skill names to their competing identifiers. Hermes' lock.json
   keys by skill name, so two identifiers with the same trailing component
