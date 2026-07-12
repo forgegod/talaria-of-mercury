@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.log_rotate.
+"""Tests for talaria.hermes.log_rotate.
 
 Layout:
 
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from talaria.hermos import log_rotate
+from talaria.hermes import log_rotate
 from talaria.paths import ResolvedPaths
 
 

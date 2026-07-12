@@ -5,13 +5,13 @@ Twelve structured detectors run against the resolved profile's
 (``<skills_root>/.hub/lock.json`` + ``skills.disabled`` in
 ``config.yaml``). Findings are reported; no writes by default. The
 free-flight curator pass (see
-:mod:`talaria.hermos.doctor_free_flight`) is the only LLM use —
+:mod:`talaria.hermes.doctor_free_flight`) is the only LLM use —
 it analyses the selected log files plus a redacted ``config.yaml``
 with the operator's configured ``_curator`` model and returns both
 ``anomaly`` findings and ``config_suggestion`` findings. The
 ``--apply-curator-suggestions`` flag (with ``--dry-run`` to preview)
 writes the curator's config_suggestion findings to ``config.yaml``
-via the same atomic backup writer used by :mod:`talaria.hermos.auxiliary``.
+via the same atomic backup writer used by :mod:`talaria.hermes.auxiliary``.
 
 Findings come in two kinds and only one is actionable through this CLI:
 
@@ -49,7 +49,7 @@ The contract:
   whether to apply.)
 
 Detector inventory (see ``DETECTOR_IDS`` and the operator-facing
-catalog table in ``hermos/AGENTS.md``):
+catalog table in ``hermes/AGENTS.md``):
 
 * ``truncation_output``     — sessions with ``output_tokens`` above
   ``OUTPUT_TOKEN_ALERT``.
@@ -80,7 +80,7 @@ catalog table in ``hermos/AGENTS.md``):
 * ``skill_index_drift``     — drift between the on-disk skill walk,
   ``<skills_root>/.hub/lock.json``, and ``skills.disabled`` in
   ``config.yaml``. Names that exist in only some of the three
-  sources fire the alert; see :mod:`talaria.hermos.skill_index`.
+  sources fire the alert; see :mod:`talaria.hermes.skill_index`.
 """
 
 from __future__ import annotations
@@ -322,7 +322,7 @@ DETECTOR_IDS: tuple[str, ...] = (
 #: Every detector is a *confident* detector — its verdict is decided
 #: in pure Python with no model call. The free-flight curator pass is
 #: the only place the model is consulted (see
-#: :mod:`talaria.hermos.doctor_free_flight`).
+#: :mod:`talaria.hermes.doctor_free_flight`).
 CONFIDENT_DETECTORS: frozenset[str] = frozenset(DETECTOR_IDS)
 
 #: Severity values for ``DetectorResult.severity``.
@@ -860,7 +860,7 @@ def detector_skill_index_drift(paths: ResolvedPaths) -> DetectorResult:
     (skill content drift) and would warrant a sibling detector if it
     becomes a recurring false positive.
     """
-    from talaria.hermos.skill_index import index_to_report, read_index
+    from talaria.hermes.skill_index import index_to_report, read_index
 
     idx = read_index(paths)
     fired = idx.has_drift
@@ -949,7 +949,7 @@ def run(
     ``apply_curator_suggestions``, the active profile's ``config.yaml``
     is written via :func:`talaria.sync.writer.write_with_backup`
     (the same atomic backup writer used by
-    :mod:`talaria.hermos.auxiliary`). With ``apply_dry_run=True`` the
+    :mod:`talaria.hermes.auxiliary`). With ``apply_dry_run=True`` the
     proposed change is computed and reported but no bytes are
     written. The two flags are independent:
     ``apply_curator_suggestions=False`` skips the apply path entirely
@@ -974,7 +974,7 @@ def run(
         skip: blacklist of detector ids. Empty = run all.
         free_flight: when True (default), run the open-ended
             curator pass over raw evidence (see
-            :mod:`talaria.hermos.doctor_free_flight`). Set False
+            :mod:`talaria.hermes.doctor_free_flight`). Set False
             for pure deterministic results.
         free_flight_log_lines: per-file line cap when the hermes
             framework inlines the logs folder in the model
@@ -988,7 +988,7 @@ def run(
             model is consistently slow on the operator's network.
         free_flight_runner: override the curator-model subprocess
             runner for tests. ``None`` (default) uses
-            :func:`talaria.hermos.doctor_llm.hermes_chat`.
+            :func:`talaria.hermes.doctor_llm.hermes_chat`.
         apply_curator_suggestions: when True, write curator
             ``config_suggestion`` findings to ``config.yaml`` via the
             atomic backup writer. Anomaly findings are NOT applied —
@@ -1027,7 +1027,7 @@ def run(
     free_flight_report: dict[str, Any] | None = None
     apply_report: dict[str, Any] | None = None
     if free_flight:
-        from talaria.hermos import doctor_free_flight, doctor_llm
+        from talaria.hermes import doctor_free_flight, doctor_llm
         runner = free_flight_runner
         if runner is None:
             runner = doctor_llm.hermes_chat
@@ -2030,7 +2030,7 @@ def render_human(report: dict[str, Any]) -> tuple[int, str]:
 
 
 #: Operator-facing catalog of every detector. One source of truth
-#: for the ``Detector catalog`` table in ``hermos/AGENTS.md`` and
+#: for the ``Detector catalog`` table in ``hermes/AGENTS.md`` and
 #: the ``detector_catalog`` field of ``show_resolution`` JSON.
 #: Keep the table and the AGENTS.md in sync when changing this list.
 DETECTOR_CATALOG: tuple[dict[str, str], ...] = (
@@ -2120,7 +2120,7 @@ def show_resolution(paths: ResolvedPaths) -> str:
     """Pretty-print the paths + detector inventory for debugging.
 
     The output includes a ``detector_catalog`` block — the same
-    catalog as the operator-facing table in ``hermos/AGENTS.md`` —
+    catalog as the operator-facing table in ``hermes/AGENTS.md`` —
     so the machine-readable form and the human-readable form stay
     in sync from one source of truth (``DETECTOR_CATALOG``).
     """

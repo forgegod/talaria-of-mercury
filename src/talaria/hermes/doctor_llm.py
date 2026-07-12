@@ -2,7 +2,7 @@
 
 This module is the *only* place the doctor feature talks to a
 language model. The free-flight pass in
-:mod:`talaria.hermos.doctor_free_flight` resolves the curator
+:mod:`talaria.hermes.doctor_free_flight` resolves the curator
 model + provider from the active profile's ``config.yaml`` at
 runtime (see :func:`resolve_curator_config`) and invokes
 :func:`hermes_chat` to call ``hermes chat -q`` with whatever model

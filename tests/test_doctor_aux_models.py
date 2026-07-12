@@ -353,7 +353,7 @@ class TestCuratorParity:
 # The benchmark discovers every vision-capable model (per models.dev)
 # and sends each fixture image via ``hermes chat --image``, asserting
 # the model reads it correctly. The fixture images, ground truth, and
-# matching logic live in ``talaria.hermos.benchmark`` and
+# matching logic live in ``talaria.hermes.benchmark`` and
 # ``assets/benchmark/vision/``.
 #
 # The standalone pytest below is a thin smoke test that runs the
@@ -364,7 +364,7 @@ class TestCuratorParity:
 
 @requires_hermes
 def test_benchmark_vision_live() -> None:
-    """Run ``talaria.hermos.benchmark.run`` with vision enabled.
+    """Run ``talaria.hermes.benchmark.run`` with vision enabled.
 
     This exercises the integrated vision benchmark end-to-end: it
     discovers vision-capable models from the live config, resolves
@@ -373,7 +373,7 @@ def test_benchmark_vision_live() -> None:
     correctly. The smoke (JSON) pass is disabled to keep the run
     focused on vision.
     """
-    from talaria.hermos.benchmark import run as benchmark_run
+    from talaria.hermes.benchmark import run as benchmark_run
     from talaria.paths import resolve_paths
 
     override = os.environ.get("_TESTING_TALARIA_PROFILE_CONFIG")

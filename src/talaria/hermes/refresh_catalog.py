@@ -325,7 +325,7 @@ def run(
 ) -> dict[str, Any]:
     """Fetch (when needed) and reshape the catalog.
 
-    ``paths`` is accepted for symmetry with :mod:`talaria.hermos.doctor`
+    ``paths`` is accepted for symmetry with :mod:`talaria.hermes.doctor`
     but is unused — this feature is profile-agnostic by design.
 
     Returned report::

@@ -1,6 +1,6 @@
 """Uninstall every skill below a recursive Hermes skill identifier.
 
-Mirror of :mod:`talaria.hermos.skill_install`: expand a recursive
+Mirror of :mod:`talaria.hermes.skill_install`: expand a recursive
 identifier (e.g. ``skills-sh/addyosmani/agent-skills/*``), invoke
 ``hermes skills uninstall`` for each child skill, then remove the
 uninstalled skill names from the profile's ``skills.disabled`` list so
@@ -19,7 +19,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, Callable
 
-from talaria.hermos import skill_install
+from talaria.hermes import skill_install
 from talaria.paths import ResolvedPaths
 from talaria.sync.writer import write_with_backup
 from talaria.sync.yaml_io import dump_yaml, load_yaml, validate_yaml

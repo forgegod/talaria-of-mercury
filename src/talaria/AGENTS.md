@@ -8,7 +8,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 
 - Package code lives in this subtree; tests live in `/tests`.
 - The package's public surface is `talaria.cli:main` (the console script) plus
-  the importable modules `talaria.paths`, `talaria.hermos.*`,
+  the importable modules `talaria.paths`, `talaria.hermes.*`,
   `talaria.sync.*`, and the version constant on `talaria.__version__`.
 - Backwards-incompatible changes to the CLI surface require a major version bump.
 
@@ -75,7 +75,7 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Child DOX Index
 
 - `cli/` — argparse parser, subcommand dispatch, console-script entry point.
-- `hermos/` — Hermes features: inspections, catalog refresh,
+- `hermes/` — Hermes features: inspections, catalog refresh,
   skill install/uninstall orchestration, and
   single-profile auxiliary-alias derivation (`talaria config apply-auxiliary`).
 - `sync/` — Hermes sync feature group (the write-bearing group behind

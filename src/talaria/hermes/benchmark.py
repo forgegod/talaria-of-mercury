@@ -409,7 +409,7 @@ def _smoke_call(
     ``avg_first_response_latency_s`` (from state.db) for pure
     model+gateway latency.
     """
-    from talaria.hermos.doctor_llm import hermes_chat
+    from talaria.hermes.doctor_llm import hermes_chat
 
     if runner is None:
         if shutil.which("hermes") is None:
@@ -561,7 +561,7 @@ def _vision_call(
     Returns the result dict with ``ok``, ``latency_s``, ``returncode``,
     and ``missing`` (the expected substrings not found).
     """
-    from talaria.hermos.doctor_llm import hermes_chat
+    from talaria.hermes.doctor_llm import hermes_chat
 
     if runner is None:
         if shutil.which("hermes") is None:

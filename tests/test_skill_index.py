@@ -1,11 +1,11 @@
-"""Tests for talaria.hermos.skill_index — shared reader for diagnose + prune."""
+"""Tests for talaria.hermes.skill_index — shared reader for diagnose + prune."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from talaria.hermos.skill_index import (
+from talaria.hermes.skill_index import (
     LOCK_FILENAME,
     LOCK_SUBDIR,
     profile_lock_path,

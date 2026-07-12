@@ -746,9 +746,9 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 
 ## Adding a new feature
 
-Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermes/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermos/` when they operate on one profile's own files.
+Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermes/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermes/` when they operate on one profile's own files.
 
-1. Add `talaria/hermos/<feature>.py` exposing `run(paths, **opts) -> dict` and `render_human(report) -> tuple[int, str]`.
+1. Add `talaria/hermes/<feature>.py` exposing `run(paths, **opts) -> dict` and `render_human(report) -> tuple[int, str]`.
 2. Wire its argparse subparser into `talaria.cli.build_parser`. The feature's **output tier** decides the dispatch shape:
    - **Silent-by-default** (maintenance/action commands): add `-v, --verbose` and gate the report print on `if args.verbose:`. Default run is exit code only.
    - **Print-by-default** (inspection commands whose report *is* the answer): add `-q, --quiet` and `-v, --verbose` (no-op alias for muscle memory), set `set_defaults(func=cmd_xxx, quiet=False)`, and gate the report print on `if not args.quiet:`. Default run prints.

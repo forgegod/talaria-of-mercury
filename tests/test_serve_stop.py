@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.serve_stop.
+"""Tests for talaria.hermes.serve_stop.
 
 Layout:
 
@@ -21,7 +21,7 @@ from collections import namedtuple
 import psutil
 import pytest
 
-from talaria.hermos import serve_stop
+from talaria.hermes import serve_stop
 from talaria.paths import ResolvedPaths
 
 

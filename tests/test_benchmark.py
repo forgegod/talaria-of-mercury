@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.benchmark.
+"""Tests for talaria.hermes.benchmark.
 
 Covers model discovery (dedup, sources), state.db aggregation
 (call counts, token averages, cost, reasoning level, first-response
@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from talaria.hermos import benchmark
-from talaria.hermos.benchmark import ModelTarget, discover_model_targets
+from talaria.hermes import benchmark
+from talaria.hermes.benchmark import ModelTarget, discover_model_targets
 from talaria.paths import ResolvedPaths
 from tests._helpers import make_full_state_db
 

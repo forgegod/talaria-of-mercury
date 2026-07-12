@@ -26,7 +26,7 @@ both consumers see the same numbers.
 
 All functions are read-only. Writes (deleting orphan directories,
 rewriting lock.json, editing ``skills.disabled``) live in
-:mod:`talaria.hermos.skill_prune`.
+:mod:`talaria.hermes.skill_prune`.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from talaria.hermos import skill_install
+from talaria.hermes import skill_install
 from talaria.paths import ResolvedPaths
 
 
@@ -48,7 +48,7 @@ LOCK_FILENAME = "lock.json"
 def profile_skills_root(paths: ResolvedPaths) -> Path:
     """Return the skills directory for *paths* (the active profile).
 
-    Mirrors :func:`talaria.hermos.skill_install.profile_hermes_home`:
+    Mirrors :func:`talaria.hermes.skill_install.profile_hermes_home`:
     the default profile uses ``<hermes_root>/skills``, named profiles
     use ``<hermes_root>/profiles/<name>/skills``.
     """

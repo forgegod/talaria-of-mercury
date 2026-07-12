@@ -58,7 +58,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   in `build_parser` that delegates to a `cmd_<group>_<feature>` function.
 - Subcommand names use kebab-case (`doctor`); Python functions and
   module names use snake_case (`cmd_hermes_doctor`,
-  `talaria.hermos.doctor`).
+  `talaria.hermes.doctor`).
 - `--json` flag is always present on data-producing subcommands and produces
   a JSON dump via `json.dumps(payload, indent=2, default=str)`.
 - **Silent-by-default contract.** Every `cmd_*` function that produces a
@@ -123,7 +123,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   actually delete, and the bare command is a no-op (exit 0).
   `talaria skills prune` is the write counterpart of the doctor
   `skill_index_drift` detector; both consume
-  :func:`talaria.hermos.skill_index.read_index` so their drift views
+  :func:`talaria.hermes.skill_index.read_index` so their drift views
   agree.
 - `talaria hermes serve-stop` detects and stops the dashboard/serve backend
   by its listening port (profile-agnostic, Linux-only). It takes `--port`,
@@ -186,7 +186,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   when `--only` / `--skip` excludes any, a `skipped:` header lists
   them so the operator sees what was left out. The 12 detector ids
   and their thresholds are listed in the `Detector catalog` table
-  in `hermos/AGENTS.md` and surfaced programmatically via
+  in `hermes/AGENTS.md` and surfaced programmatically via
   `--show-resolution` (`detector_catalog` block).
   Apply scope: `--apply-curator-suggestions` writes only curator
   `config_suggestion` findings (findings whose id starts with

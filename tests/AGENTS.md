@@ -154,7 +154,7 @@ Pytest suite for the Talaria CLI and library.
   opt-in). Also includes curator parity invariant
   (`xfail(strict=False)`), a live vision smoke test
   (`test_benchmark_vision_live`) that runs the integrated
-  `talaria.hermos.benchmark.run` with `vision=True` against the
+  `talaria.hermes.benchmark.run` with `vision=True` against the
   live profile, and deterministic config-invariant checks (YAML
   parse, required aliases, non-empty model ids, model.default set,
   discovery finds ≥1 target) that always run. Vision capability is

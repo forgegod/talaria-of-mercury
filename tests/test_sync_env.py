@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.sync_env — refresh profile .env values from env.
+"""Tests for talaria.hermes.sync_env — refresh profile .env values from env.
 
 Covers the single-profile API: the profile's own .env values are refreshed
 from a source environment dictionary, but the file's variable *set* is
@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from talaria.hermos import sync_env
+from talaria.hermes import sync_env
 from talaria.paths import ResolvedPaths
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

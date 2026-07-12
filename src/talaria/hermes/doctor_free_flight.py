@@ -50,14 +50,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from talaria.hermos.doctor import (
+from talaria.hermes.doctor import (
     SEVERITY_ALERT,
     SEVERITY_INFO,
     SEVERITY_WARN,
     DetectorResult,
     resolve_window,
 )
-from talaria.hermos import doctor_llm
+from talaria.hermes import doctor_llm
 from talaria.paths import ResolvedPaths
 
 logger = logging.getLogger(__name__)
@@ -401,7 +401,7 @@ def _resolve_config_path(paths: ResolvedPaths) -> Path:
 
 def _discover_log_files(paths: ResolvedPaths, include_curator: bool) -> list[Path]:
     """Use the doctor log-discovery so behaviour stays consistent."""
-    from talaria.hermos import doctor
+    from talaria.hermes import doctor
     return doctor.discover_log_files(
         paths.log_dir, include_curator=include_curator,
     )
@@ -495,7 +495,7 @@ def _findings_for_prompt(paths: ResolvedPaths) -> list[dict[str, Any]]:
     pruned list suitable for inline inclusion in the model
     prompt.
     """
-    from talaria.hermos import doctor
+    from talaria.hermes import doctor
     report = doctor.run(
         paths, days=0, since=None, include_curator=False, free_flight=False,
     )

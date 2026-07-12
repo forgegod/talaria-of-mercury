@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.skill_category."""
+"""Tests for talaria.hermes.skill_category."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from talaria.hermos import skill_category
+from talaria.hermes import skill_category
 from talaria.paths import ResolvedPaths
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

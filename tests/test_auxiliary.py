@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.auxiliary — single-profile alias derivation.
+"""Tests for talaria.hermes.auxiliary — single-profile alias derivation.
 
 These cover the alias-derivation contract (sentinel skipping, alias
 preservation, idempotency, dry-run) against the single-profile API:
@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from talaria.hermos import auxiliary
+from talaria.hermes import auxiliary
 from talaria.paths import ResolvedPaths
 from talaria.sync.yaml_io import dump_yaml, load_yaml
 

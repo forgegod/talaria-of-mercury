@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.refresh_catalog.
+"""Tests for talaria.hermes.refresh_catalog.
 
 Layout:
 
@@ -26,7 +26,7 @@ from urllib import request as urllib_request
 
 import pytest
 
-from talaria.hermos import refresh_catalog
+from talaria.hermes import refresh_catalog
 from talaria.paths import ResolvedPaths
 
 # ---------- Helpers ----------

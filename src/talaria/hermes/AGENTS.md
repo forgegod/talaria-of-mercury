@@ -1,4 +1,4 @@
-# src/talaria/hermos
+# src/talaria/hermes
 
 ## Purpose
 

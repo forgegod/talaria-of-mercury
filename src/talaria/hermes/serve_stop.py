@@ -172,7 +172,7 @@ def run(
 ) -> dict[str, Any]:
     """Detect and (optionally) stop the Hermes backend on *port*.
 
-    ``paths`` is accepted for symmetry with the other ``hermos`` features
+    ``paths`` is accepted for symmetry with the other ``hermes`` features
     but is unused — detection is purely port-based and profile-agnostic.
 
     Returned report::

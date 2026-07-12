@@ -354,7 +354,7 @@ def run(
     similarity_assessments: list[dict[str, Any]] = []
     replaced_skills: list[dict[str, Any]] = []
     if apply:
-        from talaria.hermos import skill_similarity
+        from talaria.hermes import skill_similarity
 
         for skill_id in identifiers:
             name = skill_name_from_identifier(skill_id)
@@ -383,7 +383,7 @@ def run(
                 if replace_similar:
                     _say(f"    --replace-similar-skill: uninstalling {name} ...")
                     if uninstaller is None:
-                        from talaria.hermos import skill_uninstall
+                        from talaria.hermes import skill_uninstall
                         uninstaller = skill_uninstall.default_uninstaller
                     unres = uninstaller(skill_id, paths)
                     replaced_skills.append({

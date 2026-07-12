@@ -10,7 +10,7 @@ Reconciles the three sources of skill state in the active profile:
 
 Drift between the three is reported by the
 ``talaria hermes doctor`` ``skill_index_drift`` detector; this
-module is the write side. Read :mod:`talaria.hermos.skill_index` for
+module is the write side. Read :mod:`talaria.hermes.skill_index` for
 the shared read helpers and the drift taxonomy.
 
 Prune classes (selectable via flags; all default to OFF so a bare
@@ -59,7 +59,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from talaria.hermos.skill_index import (
+from talaria.hermes.skill_index import (
     LOCK_SUBDIR,
     read_index,
 )
@@ -212,7 +212,7 @@ def run(
     bare command is a no-op. ``--dry-run`` (``apply=False``) is the
     default for safety; pass ``--apply`` to actually delete.
 
-    Reads once via :func:`talaria.hermos.skill_index.read_index`,
+    Reads once via :func:`talaria.hermes.skill_index.read_index`,
     computes the drift sets, then performs the selected writes.
     Filesystem deletes are ``shutil.rmtree`` (recursive, no prompt);
     lock.json writes take a ``.bak`` snapshot before overwriting

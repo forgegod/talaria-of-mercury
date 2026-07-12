@@ -15,9 +15,9 @@ import sys
 from pathlib import Path
 
 import talaria
-from talaria.hermos import doctor as doctor_module
-from talaria.hermos import refresh_catalog as refresh_catalog_module
-from talaria.hermos import benchmark as benchmark_module
+from talaria.hermes import doctor as doctor_module
+from talaria.hermes import refresh_catalog as refresh_catalog_module
+from talaria.hermes import benchmark as benchmark_module
 from talaria.paths import resolve_paths
 from talaria.sync import (
     SyncOptions,
@@ -73,7 +73,7 @@ def _parse_csv(value: str) -> tuple[str, ...]:
 
 
 def cmd_hermes_doctor(args: argparse.Namespace) -> int:
-    from talaria.hermos import doctor
+    from talaria.hermes import doctor
     paths = resolve_paths(
         profile_flag=args.profile,
         state_db_flag=args.state_db,
@@ -130,7 +130,7 @@ def cmd_hermes_doctor(args: argparse.Namespace) -> int:
 
 # ---------- Subcommand: talaria hermes benchmark ----------
 def cmd_hermes_benchmark(args: argparse.Namespace) -> int:
-    from talaria.hermos import benchmark
+    from talaria.hermes import benchmark
     paths = resolve_paths(
         profile_flag=args.profile,
         state_db_flag=args.state_db,
@@ -195,7 +195,7 @@ def _default_catalog_dst(gateway: str = refresh_catalog_module.DEFAULT_GATEWAY) 
 
 
 def cmd_hermes_refresh_catalog(args: argparse.Namespace) -> int:
-    from talaria.hermos import refresh_catalog
+    from talaria.hermes import refresh_catalog
     # Profile-agnostic by design, but resolve_paths() is cheap and keeps
     # the dispatch shape identical to the other hermes subcommands.
     paths = resolve_paths(profile_flag=args.profile)
@@ -223,7 +223,7 @@ def cmd_hermes_refresh_catalog(args: argparse.Namespace) -> int:
 
 # ---------- Subcommand: talaria hermes skills install ----------
 def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
-    from talaria.hermos import skill_install
+    from talaria.hermes import skill_install
 
     paths = resolve_paths(profile_flag=args.profile)
     if args.show_resolution:
@@ -253,7 +253,7 @@ def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
 
 # ---------- Subcommand: talaria skills uninstall ----------
 def cmd_hermes_skills_uninstall(args: argparse.Namespace) -> int:
-    from talaria.hermos import skill_uninstall
+    from talaria.hermes import skill_uninstall
 
     paths = resolve_paths(profile_flag=args.profile)
     if args.show_resolution:
@@ -278,7 +278,7 @@ def cmd_hermes_skills_uninstall(args: argparse.Namespace) -> int:
 
 # ---------- Subcommand: talaria skills create-category ----------
 def cmd_hermes_skills_create_category(args: argparse.Namespace) -> int:
-    from talaria.hermos import skill_category
+    from talaria.hermes import skill_category
 
     paths = resolve_paths(profile_flag=args.profile)
     if args.show_resolution:
@@ -305,7 +305,7 @@ def cmd_hermes_skills_create_category(args: argparse.Namespace) -> int:
 
 # ---------- Subcommand: talaria skills prune ----------
 def cmd_hermes_skills_prune(args: argparse.Namespace) -> int:
-    from talaria.hermos import skill_prune
+    from talaria.hermes import skill_prune
 
     paths = resolve_paths(profile_flag=args.profile)
     report = skill_prune.run(
@@ -414,7 +414,7 @@ def sync_list_config_paths(profile, *, max_depth: int) -> list[str]:
 
 # ---------- Subcommand: talaria hermes serve-stop ----------
 def cmd_hermes_serve_stop(args: argparse.Namespace) -> int:
-    from talaria.hermos import serve_stop
+    from talaria.hermes import serve_stop
 
     paths = resolve_paths(profile_flag=args.profile)
     if args.show_resolution:
@@ -466,7 +466,7 @@ def _log_rotate_target_paths(args: argparse.Namespace) -> list[tuple[str, Path]]
 
 
 def cmd_hermes_log_rotate(args: argparse.Namespace) -> int:
-    from talaria.hermos import log_rotate as log_rotate_module
+    from talaria.hermes import log_rotate as log_rotate_module
 
     targets = _log_rotate_target_paths(args)
     if args.show_resolution:
@@ -522,7 +522,7 @@ def cmd_hermes_log_rotate(args: argparse.Namespace) -> int:
 
 
 def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
-    from talaria.hermos import auxiliary
+    from talaria.hermes import auxiliary
 
     paths = resolve_paths(profile_flag=args.profile)
     config_path = Path(args.config_path) if args.config_path else None
@@ -546,7 +546,7 @@ def cmd_config_apply_auxiliary(args: argparse.Namespace) -> int:
 
 
 def cmd_config_sync_env(args: argparse.Namespace) -> int:
-    from talaria.hermos import sync_env
+    from talaria.hermes import sync_env
 
     paths = resolve_paths(profile_flag=args.profile)
     env_file = Path(args.env_path) if args.env_path else None

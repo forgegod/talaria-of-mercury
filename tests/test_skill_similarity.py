@@ -1,11 +1,11 @@
-"""Tests for talaria.hermos.skill_similarity."""
+"""Tests for talaria.hermes.skill_similarity."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from talaria.hermos import skill_similarity
+from talaria.hermes import skill_similarity
 from talaria.paths import ResolvedPaths
 
 

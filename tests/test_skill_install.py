@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.skill_install."""
+"""Tests for talaria.hermes.skill_install."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from talaria.hermos import skill_install
+from talaria.hermes import skill_install
 from talaria.paths import ResolvedPaths
 from talaria.sync.yaml_io import dump_yaml, load_yaml
 
@@ -385,7 +385,7 @@ class TestNameCollisions:
             lambda ident: ["new/arxiv"],
         )
         # Mock fetch_incoming to return a similar frontmatter (avoids network)
-        from talaria.hermos import skill_similarity
+        from talaria.hermes import skill_similarity
         monkeypatch.setattr(
             skill_similarity,
             "fetch_incoming_frontmatter",
@@ -393,7 +393,7 @@ class TestNameCollisions:
                 "arxiv", "Search arXiv papers by author", ident,
             ),
         )
-        from talaria.hermos import skill_uninstall
+        from talaria.hermes import skill_uninstall
 
         uninstall_calls = []
         install_calls = []
@@ -452,7 +452,7 @@ class TestNameCollisions:
             lambda ident: ["new/arxiv"],
         )
         # Mock fetch_incoming to return a similar frontmatter (avoids network)
-        from talaria.hermos import skill_similarity as _ss
+        from talaria.hermes import skill_similarity as _ss
         monkeypatch.setattr(
             _ss,
             "fetch_incoming_frontmatter",

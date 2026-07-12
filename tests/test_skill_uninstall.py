@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.skill_uninstall."""
+"""Tests for talaria.hermes.skill_uninstall."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from talaria.hermos import skill_install, skill_uninstall
+from talaria.hermes import skill_install, skill_uninstall
 from talaria.paths import ResolvedPaths
 from talaria.sync.yaml_io import dump_yaml, load_yaml
 

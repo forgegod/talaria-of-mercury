@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.doctor, doctor_llm, and doctor_free_flight.
+"""Tests for talaria.hermes.doctor, doctor_llm, and doctor_free_flight.
 
 The canonical fixture lives in :mod:`tests._helpers.make_full_state_db`,
 which mirrors the production Hermes sessions / messages / compression_locks
@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from talaria.hermos import doctor, doctor_free_flight, doctor_llm
-from talaria.hermos.doctor import DetectorResult
+from talaria.hermes import doctor, doctor_free_flight, doctor_llm
+from talaria.hermes.doctor import DetectorResult
 from talaria.paths import ResolvedPaths
 from talaria.sync.yaml_io import dump_yaml
 from tests._helpers import make_full_state_db
@@ -1200,7 +1200,7 @@ class TestRemediationHints:
 
 class TestRedaction:
     def test_secret_parent_redacts_children(self) -> None:
-        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
+        from talaria.hermes.doctor_free_flight import _redact_raw_yaml
         raw = "auth:\n  token: bearer-abc\n  type: oauth\n"
         out = _redact_raw_yaml(raw)
         assert "auth: ***REDACTED***" in out
@@ -1209,27 +1209,27 @@ class TestRedaction:
         assert "bearer-abc" not in out
 
     def test_preserves_legitimate_keys(self) -> None:
-        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
+        from talaria.hermes.doctor_free_flight import _redact_raw_yaml
         raw = "model:\n  default: gpt-5\nmoa:\n  presets:\n    coding:\n      max_tokens: 32768\n"
         out = _redact_raw_yaml(raw)
         assert "max_tokens: 32768" in out
         assert "default: gpt-5" in out
 
     def test_api_key_redaction(self) -> None:
-        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
+        from talaria.hermes.doctor_free_flight import _redact_raw_yaml
         out = _redact_raw_yaml("api_key: sk-secret\nmodel: gpt\n")
         assert "api_key: ***REDACTED***" in out
         assert "sk-secret" not in out
         assert "model: gpt" in out
 
     def test_top_level_secret_key_redaction(self) -> None:
-        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
+        from talaria.hermes.doctor_free_flight import _redact_raw_yaml
         out = _redact_raw_yaml("token: abc\nmodel: gpt\n")
         assert "token: ***REDACTED***" in out
         assert "abc" not in out
 
     def test_comments_and_blanks_preserved(self) -> None:
-        from talaria.hermos.doctor_free_flight import _redact_raw_yaml
+        from talaria.hermes.doctor_free_flight import _redact_raw_yaml
         raw = "# header comment\n\napi_key: sk-x\n# footer\n"
         out = _redact_raw_yaml(raw)
         assert "# header comment" in out
@@ -1938,7 +1938,7 @@ class TestScanLogTruncations:
 class TestSkillIndexDrift:
     """The skill_index_drift detector surfaces three classes of drift.
 
-    Mirrors :mod:`talaria.hermos.skill_index` — the detector is a thin
+    Mirrors :mod:`talaria.hermes.skill_index` — the detector is a thin
     read-only consumer of :func:`read_index`.
     """
 

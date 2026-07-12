@@ -7,7 +7,7 @@ narrowly scoped maintenance on a single profile's configuration artefacts.
 
 from __future__ import annotations
 
-from talaria.hermos import (
+from talaria.hermes import (
     auxiliary,
     doctor,
     log_rotate,

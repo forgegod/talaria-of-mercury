@@ -1,4 +1,4 @@
-"""Tests for talaria.hermos.skill_prune — write side of the skill-index reconcile.
+"""Tests for talaria.hermes.skill_prune — write side of the skill-index reconcile.
 
 The prune tool removes drift between the filesystem walk, lock.json,
 and skills.disabled. Tests cover the three prune classes plus the
@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from talaria.hermos.skill_index import LOCK_FILENAME, LOCK_SUBDIR
-from talaria.hermos import skill_prune
+from talaria.hermes.skill_index import LOCK_FILENAME, LOCK_SUBDIR
+from talaria.hermes import skill_prune
 from talaria.paths import ResolvedPaths
 from talaria.sync.yaml_io import dump_yaml, load_yaml
 
