@@ -17,7 +17,6 @@ Talaria gives Hermes operators a single installable CLI for everything the agent
 - 👁️ **Verify vision capability** — the benchmark automatically sends real images to every vision-capable model (per models.dev) and asserts the model reads them correctly: counting, OCR, spatial reasoning, and brand-logo recognition. `--no-vision` disables the checks.
 - 🧩 **Manage skills at scale** — recursively install, categorize, and uninstall third-party skill collections from GitHub or skills.sh, with collision detection and fuzzy similarity matching to prevent silent overwrites.
 - 🔄 **Keep profiles in sync** — copy config, SOUL.md, skills, `.env`, context cache, and OAuth tokens between profiles; refresh `.env` values from the live environment; derive model aliases from auxiliary pins.
-- 🗂️ **Refresh model catalogs** — fetch and reshape gateway-backed model manifests into Hermes' provider cache.
 - 🛑 **Stop runaway backends** — detect and gracefully terminate Hermes dashboard/serve processes by port (not cmdline pattern).
 - 🌀 **Bound log directories** — rotate active logs (copy → gzip → truncate), prune rotated copies and curator snapshots by age and aggregate size, and sweep every profile with `--all-profiles`.
 
@@ -31,7 +30,6 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria completion <shell>` | — | Print a bash or zsh shell completion script. |
 | `talaria hermes doctor` | inspection | Multi-detector profile anomaly scan (state.db + logs + optional curator free-flight pass). |
 | `talaria hermes benchmark` | inspection | Per-model health, cost, latency, capabilities, vision verification from state.db + models.dev + cached smoke + vision calls. Parallel subprocess execution (`--jobs`). |
-| `talaria hermes refresh-catalog` | maintenance | Refresh and reshape a gateway-backed model manifest. |
 | `talaria hermes serve-stop` | maintenance | Detect and stop the Hermes dashboard/serve backend by port. |
 | `talaria hermes log-rotate` | maintenance | Rotate active logs (copy→gzip→truncate) and prune rotated copies + curator snapshots by age / aggregate size. |
 | `talaria skills install` | skills | Install skill(s) under an identifier (recursive if `/*`) with category and enable policy. |
@@ -111,8 +109,8 @@ remaining useful interactively.
 
 **Silent by default, opt-in to print** — most commands are exit-code-only
 when run without flags. `--verbose` (`-v`) prints the human-readable report.
-This is the pattern for: `hermes refresh-catalog`, `hermes serve-stop`,
-`skills install`, `skills uninstall`, `skills create-category`,
+This is the pattern for: `hermes serve-stop`, `skills install`,
+`skills uninstall`, `skills create-category`,
 `config sync`, `config apply-auxiliary`, `config sync-env`.
 
 **Print by default, opt-out to suppress** — inspection commands whose report
@@ -160,9 +158,6 @@ talaria hermes doctor --apply-curator-suggestions --dry-run
 
 # Benchmark every model: health + cost + latency + capabilities + vision
 talaria hermes benchmark
-
-# Refresh the Kilo Code gateway model catalog
-talaria hermes refresh-catalog --gateway kilocode
 
 # Install every child skill below a skills.sh repo path into a category
 talaria skills create-category software-development \
@@ -351,40 +346,6 @@ Vision results are cached alongside smoke results in the same cache file (`$XDG_
 Ground-truth entries support `|`-separated alternatives for visually-ambiguous fixtures — e.g. the stylised wing glyph may read as "wings", "winged", "sandal", or "butterfly" depending on the model, all of which are valid. Pass `--no-vision` to skip all vision checks.
 
 Smoke and vision calls run in parallel (default 8 workers, `--jobs N` to tune). Each call is an I/O-bound model API wait, so a cold run of 10 vision-capable models × 4 fixtures (40 calls) finishes in ~3 min instead of ~21 min sequential.
-
-## Feature: `talaria hermes refresh-catalog`
-
-Refreshes the selected gateway model catalog into that provider's Hermes manifest cache. Profile-agnostic — every Hermes profile reads the same provider cache.
-
-### Usage
-
-```bash
-# idempotent: skip the fetch if the selected provider cache is younger than 6h
-talaria hermes refresh-catalog --gateway kilocode
-
-# force a refresh
-talaria hermes refresh-catalog --gateway kilocode --force
-
-# custom destination + JSON report
-talaria hermes refresh-catalog --dst /tmp/kilocode.json --json
-```
-
-### Flags
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--gateway NAME` | `kilocode` | Gateway catalog to fetch (currently only `kilocode`). |
-| `--dst PATH` | gateway-specific XDG cache path | Destination manifest path. |
-| `--src-url URL` | selected gateway endpoint | Catalog endpoint (advanced). |
-| `--max-age-seconds N` | `21600` (6h) | Skip fetch when the cache is younger than this. |
-| `--force` | off | Refetch even when the cache is fresh. |
-| `--json` | off | Emit JSON instead of human-readable output. |
-| `--show-resolution` | off | Print the resolved cache path + source URL and exit 0. |
-| `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
-
-Three steps: fetch the live catalog, reshape into the Hermes manifest schema (normalising pricing to per-million-token values), and atomic-write to the destination via a sibling temp file + `os.replace`.
-
-Exit code `2` with `reason: "auth" | "network" | "parse" | "write"` disambiguates failure modes. No `1` exit — there is no alert condition, only success vs. tool error.
 
 ## Feature: `talaria hermes serve-stop`
 
@@ -579,7 +540,7 @@ talaria skills create-category preview --dry-run
 | `--show-resolution` | off | Print the resolved category directory and validation result, then exit. |
 | `-v`, `--verbose` | off | Print the human-readable report (default: silent, exit code only). |
 
-Category names must match Hermes' regex: `^[a-z][a-z0-9_/-]*$` (lowercase letters, digits, hyphens, underscores, slashes). Creating an existing category is a no-op on the directory; re-writing its `DESCRIPTION.md` goes through the atomic backup writer.
+Category names must match Hermes' regex: <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code> (lowercase letters, digits, hyphens, underscores, slashes). Creating an existing category is a no-op on the directory; re-writing its `DESCRIPTION.md` goes through the atomic backup writer.
 
 ## Feature: `talaria config sync`
 
@@ -732,8 +693,7 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 | Var | Effect |
 |-----|--------|
 | `HERMES_PROFILE` | Profile name to inspect when `--profile` is omitted. |
-| `XDG_CACHE_HOME` | Parent directory for the catalog cache and the benchmark smoke/vision cache (`$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`). |
-| `KILOCODE_API_KEY` | Kilo Code gateway API key used by `refresh-catalog --gateway kilocode` (also read from `~/.hermes/.env`). |
+| `XDG_CACHE_HOME` | Parent directory for the benchmark smoke/vision cache (`$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json`). |
 | `GITHUB_TOKEN` / `GH_TOKEN` | Used by `skills install` for GitHub tree expansion and by similarity fetches for raw content access. |
 
 **Test-only env vars** (never documented in a production env-var table; see `tests/AGENTS.md` §Local Contracts):
@@ -768,7 +728,7 @@ pytest
 pytest tests/test_benchmark.py
 ```
 
-The default test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub `urllib.request.urlopen`; no real Kilo Code or GitHub calls happen during `pytest`.
+The default test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub their HTTP clients; no real GitHub calls happen during `pytest`.
 
 The **live model benchmark** (smoke + vision calls against real models via `hermes chat`) is gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` and skipped by default to avoid burning tokens. The vision fixtures (`assets/benchmark/vision/`) are checked into the repo; regenerate them with `uv run python assets/benchmark/vision/generate_vision_fixtures.py` (requires the `pillow` dev dependency).
 

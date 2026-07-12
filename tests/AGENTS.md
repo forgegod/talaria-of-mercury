@@ -7,8 +7,8 @@ Pytest suite for the Talaria CLI and library.
 ## Ownership
 
 - One test module per feature: `test_paths.py` for path resolution,
-  `test_refresh_catalog.py`, `test_auxiliary.py`, `test_sync.py`,
-  and `test_doctor.py` for feature coverage. `test_skill_install.py`
+  `test_auxiliary.py`, `test_sync.py`, and `test_doctor.py` for feature
+  coverage. `test_skill_install.py`
   covers recursive skill install orchestration.
   `test_skill_index.py` covers the read-side skill-index reader
   (filesystem walk + lock.json + `skills.disabled`); shared by the
@@ -64,8 +64,7 @@ Pytest suite for the Talaria CLI and library.
 ## Work Guidance
 
 - New feature: drop a `tests/test_<feature>.py` alongside the existing
-  Signal/Run/Renderer/Cli test classes (see `test_refresh_catalog.py`
-  for a canonical example).
+  Signal/Run/Renderer/Cli test classes.
 - Tests assert on real exit codes (`0` / `1`), not just stdout content.
 - Use the `fake_hermes_root` fixture for layout, `make_sessions_db` for
   SQLite fixtures, and `_log_line(level, body, when)`-style helpers for
@@ -80,8 +79,6 @@ Pytest suite for the Talaria CLI and library.
 
 - `test_paths.py` — `talaria.paths` resolution precedence and the
   `talaria paths` CLI dispatch (default-prints contract).
-- `test_refresh_catalog.py` — reshape, credential discovery, cache
-  freshness, urllib-stubbed fetch, run() orchestration, renderer, CLI.
 - `test_auxiliary.py` — single-profile auxiliary-alias derivation:
   injection, sentinel skipping, preservation, no-op, idempotency,
   dry-run, profile path resolution, CLI flags.

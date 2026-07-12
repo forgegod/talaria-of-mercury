@@ -41,7 +41,7 @@ class TestCollect:
         hermes = next(s for s in root.subcommands if s.name == "hermes")
         names = {s.name for s in hermes.subcommands}
         assert names == {
-            "doctor", "benchmark", "refresh-catalog", "serve-stop", "log-rotate",
+            "doctor", "benchmark", "serve-stop", "log-rotate",
         }
 
     def test_config_group_has_three_commands(self) -> None:
@@ -136,7 +136,6 @@ class TestBash:
         for name in [
             "doctor",
             "benchmark",
-            "refresh-catalog",
             "serve-stop",
             "log-rotate",
             "install",
@@ -266,7 +265,6 @@ class TestZsh:
         for name in [
             "doctor",
             "benchmark",
-            "refresh-catalog",
             "serve-stop",
             "log-rotate",
             "install",
