@@ -16,6 +16,7 @@ from pathlib import Path
 
 import talaria
 from talaria.hermos import doctor as doctor_module
+from talaria.hermos import refresh_catalog as refresh_catalog_module
 from talaria.hermos import benchmark as benchmark_module
 from talaria.paths import resolve_paths
 from talaria.sync import (
@@ -182,6 +183,43 @@ def cmd_hermes_benchmark(args: argparse.Namespace) -> int:
     )
     return 1 if any_fail else 0
 
+
+# ---------- Subcommand: talaria hermes refresh-catalog ----------
+def _default_catalog_dst(gateway: str = refresh_catalog_module.DEFAULT_GATEWAY) -> Path:
+    """Resolve the default catalog cache path from XDG_CACHE_HOME.
+
+    Computed at call time (not module import) so tests can monkeypatch
+    the environment before invoking the parser.
+    """
+    return refresh_catalog_module.default_cache_path(gateway)
+
+
+def cmd_hermes_refresh_catalog(args: argparse.Namespace) -> int:
+    from talaria.hermos import refresh_catalog
+    # Profile-agnostic by design, but resolve_paths() is cheap and keeps
+    # the dispatch shape identical to the other hermes subcommands.
+    paths = resolve_paths(profile_flag=args.profile)
+    dst = Path(args.dst) if args.dst else _default_catalog_dst(args.gateway)
+    src_url = args.src_url or refresh_catalog.gateway_config(args.gateway).source_url
+    if args.show_resolution:
+        print(refresh_catalog.show_resolution(paths, dst=dst, gateway=args.gateway, src_url=src_url))
+        return 0
+    report = refresh_catalog.run(
+        paths,
+        dst=dst,
+        src_url=src_url,
+        max_age_seconds=args.max_age_seconds,
+        force=args.force,
+        gateway=args.gateway,
+    )
+    if args.json:
+        _print_json(report)
+        return 0 if report["ok"] else 2
+    if args.verbose:
+        exit_code, text = refresh_catalog.render_human(report)
+        print(text)
+        return exit_code
+    return 0 if report["ok"] else 2
 
 # ---------- Subcommand: talaria hermes skills install ----------
 def cmd_hermes_skills_install(args: argparse.Namespace) -> int:
@@ -841,6 +879,55 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the human-readable report (default behaviour; kept for convenience).",
     )
     p_bench.set_defaults(func=cmd_hermes_benchmark, quiet=False)
+
+    # talaria hermes refresh-catalog
+    p_catalog = hermes_sub.add_parser(
+        "refresh-catalog",
+        help="Refresh a gateway model catalog into the Hermes manifest cache.",
+        description=(
+            "Fetch the selected gateway catalog and reshape it into the "
+            "Hermes manifest schema. Writes to the gateway-specific "
+            "$XDG_CACHE_HOME cache file by default. Skips the fetch when "
+            "the cache is younger than --max-age-seconds."
+        ),
+    )
+    p_catalog.add_argument(
+        "--gateway",
+        choices=sorted(refresh_catalog_module.GATEWAYS),
+        default=refresh_catalog_module.DEFAULT_GATEWAY,
+        help="Gateway/provider catalog to refresh (currently only: kilocode).",
+    )
+    p_catalog.add_argument(
+        "--dst", type=Path, default=None,
+        help="Destination manifest path (default: gateway-specific file in $XDG_CACHE_HOME).",
+    )
+    p_catalog.add_argument(
+        "--src-url", default=None,
+        help="Catalog endpoint URL (advanced; defaults to the selected gateway).",
+    )
+    p_catalog.add_argument(
+        "--max-age-seconds", type=int, default=refresh_catalog_module.MAX_AGE_SECONDS,
+        help="Skip fetch when the cache is younger than this many seconds (default: 6h).",
+    )
+    p_catalog.add_argument(
+        "--force", action="store_true",
+        help="Refetch even when the cache is fresh.",
+    )
+    p_catalog.add_argument(
+        "--profile", help="Recorded in the report for debugging; does not affect the cache path.",
+    )
+    p_catalog.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of human-readable output.",
+    )
+    p_catalog.add_argument(
+        "--show-resolution", action="store_true",
+        help="Print the resolved cache path and source URL, then exit.",
+    )
+    p_catalog.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print the human-readable report on stdout (default: silent, exit code only).",
+    )
+    p_catalog.set_defaults(func=cmd_hermes_refresh_catalog)
 
     # talaria hermes serve-stop
     p_serve_stop = hermes_sub.add_parser(

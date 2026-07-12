@@ -3,8 +3,8 @@
 ## Purpose
 
 Hermes-specific Talaria features — inspections of the agent's `state.db`
-and `logs/`, plus narrowly scoped maintenance for profile configuration
-and log directories.
+and `logs/`, plus narrowly scoped maintenance for Hermes model metadata
+caches.
 
 ## Ownership
 
@@ -51,6 +51,11 @@ and log directories.
   model uses its file-read tools to inspect them on demand. The
   temp directory survives the full subprocess call + result parsing.
   Two finding kinds are returned: `anomaly` and `config_suggestion`.
+- `refresh_catalog` is profile-agnostic by design — every Hermes profile
+  reads the same provider cache. `--gateway` selects which provider's
+  catalog is fetched and which provider manifest is written (currently
+  only `kilocode`). Do not add `--profile` filtering, per-profile
+  caches, or any logic that treats this feature as a state.db/logs consumer.
 - `auxiliary` is profile-scoped by design — it derives
   `model.aliases._<usecase>` entries from the selected profile's own
   `auxiliary.<usecase>.model` block and writes them back into the same
@@ -62,7 +67,7 @@ and log directories.
   `hermes skills install --category` so skills land in
   `skills/<category>/<name>/` instead of the flat root. The category value
   is the literal directory name (e.g. `software-development`), not a display
-  name — Hermes' validation regex (<code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>) rejects uppercase.
+  name — Hermes' validation regex (`^[a-z][a-z0-9_/-]*$`) rejects uppercase.
 - `skill_uninstall` is profile-scoped by design — it mirrors `skill_install`:
   expand the identifier, invoke `hermes skills uninstall` for each child skill
   *name* (unlike install, uninstall takes a name, not an identifier), and
@@ -159,7 +164,7 @@ and log directories.
   `DESCRIPTION.md` whose frontmatter `description:` is rendered in the
   Hermes system prompt after the category name. Category names are the
   literal directory name (e.g. `software-development`, `mlops/training`),
-  validated against Hermes' regex <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>. Creating a
+  validated against Hermes' regex `^[a-z][a-z0-9_/-]*$`. Creating a
   category that already exists is a no-op on the directory; re-writing
   its `DESCRIPTION.md` goes through the atomic backup writer with an
   optional `.bak`. `--dry-run` must not create any directory or file.
@@ -360,6 +365,10 @@ its findings (anomaly + config_suggestion) are emitted under the
   `vision_dir_found`. Smoke and vision calls run in parallel via
   `ThreadPoolExecutor` (default `DEFAULT_JOBS = 8`; `--jobs N` to tune,
   `--jobs 1` for sequential). The report summary carries `jobs`.
+- `refresh_catalog` reports use `ok: bool` instead of `fired` because
+  there is no alert condition — there is only "refresh succeeded" vs.
+  "tool error". Exit code 2 covers all failure modes
+  (auth/network/parse/write); the `reason` field disambiguates them.
 - `skill_install` reports use `ok: bool`; recursive installs are disabled by
   default via `skills.disabled` unless `--force-enable` or `--enable` says
   otherwise. `--dry-run` must not invoke Hermes or write `config.yaml`.
@@ -423,7 +432,7 @@ its findings (anomaly + config_suggestion) are emitted under the
   `description_written: bool`. Writes go through the atomic backup
   writer. `--dry-run` must not create a directory or write
   `DESCRIPTION.md`. The category name must match Hermes' category regex
-  <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-9_/-&rbrack;*$</code>; invalid names raise `SkillCategoryError`.
+  `^[a-z][a-z0-9_/-]*$`; invalid names raise `SkillCategoryError`.
 - `skill_install` reports include `name_collisions` — a dict mapping
   colliding skill names to their competing identifiers. Hermes' lock.json
   keys by skill name, so two identifiers with the same trailing component
@@ -470,6 +479,8 @@ its findings (anomaly + config_suggestion) are emitted under the
   module.
 - Feature-specific constants (regexes, thresholds, default windows) live at
   the top of the module.
+- Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`
+  does the fetch + reshape + write path inside the Python CLI.
 - Skill install/uninstall must delegate actual semantics to `hermes skills
   install` / `hermes skills uninstall`; do not vendor or copy Hermes' hub
   installer into Talaria. Note: `hermes skills uninstall` takes a skill
@@ -523,6 +534,9 @@ its findings (anomaly + config_suggestion) are emitted under the
   kinds, default kind, invalid kind fallback), fenced-JSON / bare-
   JSON / garbage-input parsing, stub-runner finding return, and
   unavailable-runner degradation.
+- `refresh_catalog` tests stub `urllib.request.urlopen` and run the full
+  `run()` orchestrator against realistic upstream payloads. No real
+  network is used.
 - `skill_install` tests cover GitHub tree expansion, default-disabled policy,
   selected enablement, force-enable, dry-run suppression, CLI flags, and
   `--category` forwarding (command construction, omission when empty,
@@ -626,6 +640,8 @@ its findings (anomaly + config_suggestion) are emitted under the
   kinds (`anomaly` + `config_suggestion`) and returns them as
   `DetectorResult` objects. Config suggestions never fire
   (`fired=False`); the operator decides whether to act.
+- `refresh_catalog.py` — fetch + reshape the selected gateway catalog into
+  the matching Hermes provider manifest cache. Profile-agnostic.
 - `skill_install.py` — expand skill identifiers (recursive when ending in
   `/*`) and run per-skill Hermes installs, then update `skills.disabled`
   in profile config.
