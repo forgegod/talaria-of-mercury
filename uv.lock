@@ -381,8 +381,8 @@ wheels = [
 ]
 
 [[package]]
-name = "talaria"
-version = "1.0.0"
+name = "talaria-of-mercury"
+version = "1.0.2"
 source = { editable = "." }
 dependencies = [
     { name = "psutil" },

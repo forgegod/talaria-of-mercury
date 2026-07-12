@@ -1,6 +1,6 @@
 # Talaria — Winged Sandals for the Hermes Agent
 
-<p align="center"><img src="assets/logo.svg" alt="Talaria"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/forgegod/talaria-of-mercury/main/assets/logo.svg" alt="Talaria"></p>
 
 > *"With these sandals I shall bear the words of Olympus across wind and wave, swift as thought, returning before the laurel of my errand has time to wither."*
 
@@ -72,8 +72,8 @@ uv pip install -e ".[dev]"
 # or with plain pip
 pip install -e ".[dev]"
 
-# or, once published
-pip install talaria
+# install the TestPyPI release; resolve runtime dependencies from PyPI
+pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ talaria-of-mercury
 ```
 
 The `[dev]` extra pulls in `pytest` and `pytest-cov` for the test suite. The `[dependency-groups] dev` group additionally pulls in `pillow` (used only by `assets/benchmark/vision/generate_vision_fixtures.py` to regenerate the fixture images).

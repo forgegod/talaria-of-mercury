@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "talaria"
-version = "1.0.0"
+name = "talaria-of-mercury"
+version = "1.0.2"
 description = "Winged sandals for the Hermes Agent — maintenance utilities for NousResearch/hermes-agent."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Raphael Bossek", email = "raphael.bossek@videoclinic.de" },
 ]
@@ -18,7 +19,6 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
@@ -44,9 +44,9 @@ dev = [
 talaria = "talaria.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/raphaelbs/talaria-of-mercury"
-Repository = "https://github.com/raphaelbs/talaria-of-mercury"
-Issues = "https://github.com/raphaelbs/talaria-of-mercury/issues"
+Homepage = "https://github.com/forgegod/talaria-of-mercury"
+Repository = "https://github.com/forgegod/talaria-of-mercury"
+Issues = "https://github.com/forgegod/talaria-of-mercury/issues"
 HermesAgent = "https://github.com/NousResearch/hermes-agent"
 
 [tool.setuptools]
