@@ -86,9 +86,27 @@ Project-wide durable preferences (style, workflow, conventions) live in user mem
 
 - **Agent harness protected by tirith.sh.** Reading passwords or access tokens is prohibited. Extract variables from `.env` / config files without relaying their values; use environment variables by importing them for Bash execution. `***` in output is a tirith redaction marker, not a literal value — never "fix" it to a variable ref.
 
-## Session-start tooling
+## Codebase Knowledge Graph (codebase-memory-mcp)
 
-- Use `code-review-graph` MCP tools for structural queries (callers, blast radius, code review) before scanning files. See the `code-review-graph` skill for tool selection and pitfalls. Projects that opt in register their repo in `~/.code-review-graph/registry.json`; pass the registered `repo_root` on tool calls.
+This project uses codebase-memory-mcp to maintain a knowledge graph of the codebase.
+ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
+
+### Priority Order
+1. `search_graph` — find functions, classes, routes, variables by pattern
+2. `trace_path` — trace who calls a function or what it calls
+3. `get_code_snippet` — read specific function/class source code
+4. `query_graph` — run Cypher queries for complex patterns
+5. `get_architecture` — high-level project summary
+
+### When to fall back to grep/glob
+- Searching for string literals, error messages, config values
+- Searching non-code files (Dockerfiles, shell scripts, configs)
+- When MCP tools return insufficient results
+
+### Examples
+- Find a handler: `search_graph(name_pattern=".*OrderHandler.*")`
+- Who calls it: `trace_path(function_name="OrderHandler", direction="inbound")`
+- Read source: `get_code_snippet(qualified_name="pkg/orders.OrderHandler")`
 
 ## Child DOX Index
 
