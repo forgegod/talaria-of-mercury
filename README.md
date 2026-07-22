@@ -640,7 +640,7 @@ talaria config sync default --list
 
 Each phase is independent and any subset runs together:
 
-1. **config.yaml** — element-level merge with `--exclude`/`--only` filtering. No-op when none of `--exclude`, `--only`, or `--add-mcp-serve` is set.
+1. **config.yaml** — source replaces target by default. `--exclude` and `--only` switch to element-level merge modes that preserve unselected target values.
 2. **SOUL.md** — straight copy with `.bak` when it differs.
 3. **skills/** — byte-level tree comparison. New and differing skills are copied; `--sync-skills` filters by category or `category/skill-name`.
 4. **.env** — additive merge. New variables appended; existing target values never overwritten.

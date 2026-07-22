@@ -47,8 +47,9 @@ profiles.
   conflict). `context_length_cache.yaml` is **source-wins**
   (factual measurements presumed more recent). `auth.json` is
   **newest-token-wins** (scans all profiles, picks the most
-  recently refreshed token per provider). `config.yaml` mode
-  follows the `--exclude` / `--only` flags.
+  recently refreshed token per provider). Plain `config.yaml` sync
+  replaces the target with the source; `--exclude` and `--only`
+  select merge modes that preserve the unselected target values.
 - Exit codes follow the talaria CLI contract: `0` clean, `2` tool
   error. The `1` "signal fired" exit is unused by sync — there is
   no alert condition.

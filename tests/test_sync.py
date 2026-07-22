@@ -245,6 +245,38 @@ class TestConfigPhase:
         assert merged["model"]["name"] == "dst-val"  # target wins on excluded
         assert merged["agent"]["x"] == 1  # source supplies
 
+    def test_identity_copies_source_model_definitions(self, tmp_path: Path) -> None:
+        source_dir = _make_source(
+            tmp_path,
+            "src",
+            {
+                "model": {
+                    "default": "openai/source-model",
+                    "aliases": {"fast": {"model": "openai/source-fast"}},
+                }
+            },
+        )
+        target_dir = _make_profile(tmp_path, "dst")
+        (target_dir / "config.yaml").write_text(
+            dump_yaml({"model": {"default": "openai/target-model", "aliases": {}}})
+        )
+        os.utime(target_dir / "config.yaml", ns=(1_000_000_000, 1_000_000_000))
+        os.utime(source_dir / "config.yaml", ns=(2_000_000_000, 2_000_000_000))
+
+        result = sync_config(
+            resolve_profile("src", root=tmp_path / HERMES),
+            resolve_profile("dst", root=tmp_path / HERMES),
+            apply=True,
+        )
+
+        assert result is not None
+        assert result.mode == "identity"
+        assert result.write_confirmed is True
+        assert load_yaml(target_dir / "config.yaml")["model"] == {
+            "default": "openai/source-model",
+            "aliases": {"fast": {"model": "openai/source-fast"}},
+        }
+
     def test_only_copies_listed_paths(self, tmp_path: Path) -> None:
         _make_source(tmp_path, "src", {"model": {"name": "x"}, "agent": {"x": 1}})
         target_dir = _make_profile(tmp_path, "dst")
@@ -746,10 +778,7 @@ class TestRunSync:
 
     def test_full_run_writes_everything(self, tmp_path: Path) -> None:
         src_dir, dst_dir = self._full_setup(tmp_path)
-        # Excludes so the config phase actually runs (otherwise it
-        # is a no-op when no --exclude / --only / --add-mcp-serve
-        # is set; see sync_config docstring).
-        options = SyncOptions(apply=True, excludes=["agent"])
+        options = SyncOptions(apply=True)
         report = run_sync(
             resolve_profile("src", root=tmp_path / HERMES),
             resolve_profile("dst", root=tmp_path / HERMES),
@@ -768,9 +797,6 @@ class TestRunSync:
         src_dir, dst_dir = self._full_setup(tmp_path)
         options = SyncOptions(
             apply=True,
-            # Triggers the config phase (otherwise it's a no-op
-            # when no --exclude / --only / --add-mcp-serve is set).
-            excludes=["agent"],
             skip_soul=True,
             skip_skills=True,
             skip_env=True,
@@ -787,7 +813,6 @@ class TestRunSync:
         assert report.env is None
         assert report.context_cache is None
         assert report.auth_tokens is None
-        # config still ran (the excludes flag kept it active)
         assert report.config is not None
 
     def test_same_source_target_rejected(self, tmp_path: Path) -> None:
@@ -859,6 +884,30 @@ class TestSyncCLI:
         assert payload["ok"] is True
         assert payload["any_writes"] is True
         assert payload["config"]["write_confirmed"] is True
+
+    def test_plain_sync_copies_source_model_definitions(self, tmp_path: Path) -> None:
+        _make_source(
+            tmp_path,
+            "src",
+            {
+                "model": {
+                    "default": "openai/source-model",
+                    "aliases": {"fast": {"model": "openai/source-fast"}},
+                }
+            },
+        )
+        target_dir = _make_profile(tmp_path, "dst")
+        result = self._cli(
+            "src", "dst",
+            "--skip-soul", "--skip-skills", "--skip-env", "--skip-cache", "--skip-auth",
+            env={"HOME": str(tmp_path)},
+        )
+
+        assert result.returncode == 0
+        assert load_yaml(target_dir / "config.yaml")["model"] == {
+            "default": "openai/source-model",
+            "aliases": {"fast": {"model": "openai/source-fast"}},
+        }
 
     def test_default_run_is_silent_on_success(self, tmp_path: Path) -> None:
         """Silent-by-default: no --verbose => no human report on stdout.

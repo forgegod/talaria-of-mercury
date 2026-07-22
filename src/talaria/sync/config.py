@@ -50,16 +50,11 @@ def sync_config(
     apply: bool = True,
     no_backup: bool = False,
     force: bool = False,
-) -> ConfigPhaseResult | None:
+) -> ConfigPhaseResult:
     """Run the ``config.yaml`` sync phase and return its result.
 
-    Returns ``None`` when the phase is a no-op: no ``--exclude``,
-    ``--only`` or ``--add-mcp-serve`` was requested. The standalone
-    tool behaved the same way — the config phase only runs when at
-    least one of those flags was set. ``talaria sync`` follows that
-    convention so a plain ``talaria sync src dst`` syncs everything
-    *except* ``config.yaml`` (matching the operator's expectation
-    that "sync" means "propagate deltas", not "nuke target").
+    With no path filters, the source config replaces the target config.
+    ``--exclude`` and ``--only`` switch to their respective merge modes.
 
     Parameters mirror the standalone tool's flag set; ``apply``
     defaults to ``True`` because ``talaria sync`` is write-by-default
@@ -71,12 +66,6 @@ def sync_config(
 
     if excludes and only_paths:
         raise ValueError("excludes and only_paths are mutually exclusive")
-
-    # No-op when none of the operator's flags requested config work.
-    # Matches the standalone tool's "config phase only runs when at
-    # least one filter is set" behaviour.
-    if not excludes and not only_paths and not add_mcp_serve:
-        return None
 
     result = ConfigPhaseResult(
         phase="config",
@@ -120,7 +109,7 @@ def sync_config(
         merged = sync_exclude(source_data, target_data, excludes)
     else:
         mode = "identity"
-        merged = copy.deepcopy(target_data)
+        merged = copy.deepcopy(source_data)
 
     # Optional: --add-mcp-serve. Inject AFTER the mode merge so the
     # entry always lands in the result, even if it was excluded by
