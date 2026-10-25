@@ -6,6 +6,11 @@
 
 **Talaria** is a maintenance CLI for [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent). It verifies mitigations, surfaces regressions, manages skill lifecycles, and keeps profiles in sync — giving the operator a single command for everything the agent itself doesn't cover.
 
+Project contracts: [architecture](docs/architecture.md),
+[current capabilities](docs/product/index.md),
+[change workflow](docs/changes/README.md), and
+[design decisions](docs/design-decisions.md).
+
 The name is deliberate. In the [Greek mythos](https://en.wikipedia.org/wiki/Talaria), the *talaria* were the winged sandals of Hermes: golden, swift, granted by Zeus, and worn by the messenger god to travel between mortal and divine realms. Hermes Agent carries his namesake's errands — tool calls, model swaps, subagent dispatch. Talaria carries its operator's errands: profile resolution, signal verification, and the verdict that tells you whether the agent is still flying cleanly or has begun to drag a wing.
 
 ## Highlights
@@ -21,7 +26,10 @@ Talaria gives Hermes operators a single installable CLI for everything the agent
 - 🛑 **Stop runaway backends** — detect and gracefully terminate Hermes dashboard/serve processes by port (not cmdline pattern).
 - 🌀 **Bound log directories** — rotate active logs (copy → gzip → truncate), prune rotated copies and curator snapshots by age and aggregate size, and sweep every profile with `--all-profiles`.
 
-Every command follows the same conventions: profile-aware path resolution, structured JSON output for cron and dashboards, `--dry-run` for safe previews, and `--show-resolution` for path debugging.
+Commands share profile-aware resolution and structured reports where applicable.
+Flag support and write defaults differ: use the command's `--help` and the
+[side-effect boundaries](docs/architecture.md#side-effects-and-trust-boundaries).
+There is no universal `--dry-run`, `--show-resolution`, or `--apply` contract.
 
 ## Features at a glance
 
@@ -37,6 +45,7 @@ Every command follows the same conventions: profile-aware path resolution, struc
 | `talaria skills install` | skills | Install skill(s) under an identifier (recursive if `/*`) with category and enable policy. |
 | `talaria skills uninstall` | skills | Uninstall skill(s) under an identifier and clean up `skills.disabled`. |
 | `talaria skills create-category` | skills | Create a skill category directory with an optional description. |
+| `talaria skills prune` | skills | Preview or apply selected repairs to filesystem, lock, and disabled-policy drift. |
 | `talaria config sync` | config | Copy config.yaml, SOUL.md, skills/, .env, context cache, and auth.json (OAuth tokens) between profiles. |
 | `talaria config apply-auxiliary` | config | Derive `model.aliases._<usecase>` from a profile's `auxiliary` block. |
 | `talaria config sync-env` | config | Refresh a profile's `.env` values from the live environment. |
@@ -115,12 +124,12 @@ This is the pattern for: `hermes refresh-catalog`, `hermes serve-stop`,
 `skills install`, `skills uninstall`, `skills create-category`,
 `config sync`, `config apply-auxiliary`, `config sync-env`.
 
-**Print by default, opt-out to suppress** — inspection commands whose report
-*is* the answer print on stdout automatically. Pass `--quiet` (`-q`) to suppress
-and get the exit code only. This is the pattern for:
+**Print by default** — commands whose report *is* the answer print on stdout
+automatically. Doctor and benchmark accept `--quiet` (`-q`) to suppress it;
+other commands below have their own flag sets:
 
 - `talaria paths` — its output *is* the resolved profile + paths.
-- `talaria hermes doctor` — the 11-detector anomaly report.
+- `talaria hermes doctor` — the 12-detector anomaly report.
 - `talaria hermes benchmark` — the per-model health/cost/capability report.
 - `talaria hermes log-rotate` — explicit-only: with no action flags it reports
   scanned size/age and exits 0 without writing.
@@ -128,10 +137,11 @@ and get the exit code only. This is the pattern for:
   asked for.
 - `talaria config sync --list` — its output *is* the dot-path list the
   operator asked for.
+- `talaria skills prune` also prints its reconciliation report by default;
+  unlike doctor/benchmark, it does not expose `--quiet`.
 
-On the print-by-default commands `-v`/`--verbose` is a kept as a no-op
-(convenience / muscle memory), not an alternative output channel — `-q` is
-the real suppressor.
+On doctor and benchmark, `-v`/`--verbose` is kept as a no-op; `-q` suppresses
+the report. Other print-by-default commands do not necessarily expose these flags.
 
 Both tiers share the explicit data channels, which always print regardless of tier:
 
@@ -309,7 +319,7 @@ talaria hermes benchmark --no-vision
 |------|---------|--------|
 | `--days N` | `7` | Look-back window for state.db session aggregation. |
 | `--ttl SECONDS` | `1800` | Cache TTL for smoke + vision results (30 min). Within the window, cached results are reused. |
-| `--no-smoke` | off | Skip all JSON smoke calls; report only state.db data. |
+| `--no-smoke` | off | Skip JSON smoke calls; vision remains enabled unless `--no-vision` is also supplied. |
 | `--no-vision` | off | Skip all vision-capability checks. By default, every discovered model whose capabilities include vision (per models.dev) is tested against the vision fixture images. |
 | `--jobs N`, `-j N` | `8` | Max parallel subprocess calls for smoke and vision checks. Each call is an I/O-bound model API wait, so parallelism gives near-linear speedup on the cold path. Use `--jobs 1` for sequential execution. |
 | `--vision-fixtures-dir PATH` | `assets/benchmark/vision/` | Override the vision fixture-image directory. |
@@ -583,7 +593,12 @@ Category names must match Hermes' regex: <code>^&lbrack;a-z&rbrack;&lbrack;a-z0-
 
 ## Feature: `talaria config sync`
 
-Copy Hermes profile artefacts (config.yaml, SOUL.md, skills/, .env, context_length_cache.yaml, and auth.json) from one profile to another. **sync is the write-bearing command** — every other Talaria command is read-only against the Hermes runtime. sync never touches `state.db` or rotates logs.
+Copy Hermes profile artefacts (config.yaml, SOUL.md, skills/, .env,
+context_length_cache.yaml, and auth.json) into a target profile. The auth phase
+selects newest provider tokens across profiles, not just the named source.
+Sync applies by default and never touches `state.db` or rotates logs. Other
+maintenance commands have their own write paths; see the architecture's
+side-effect table before assuming an operation is read-only.
 
 ### Usage
 
@@ -727,7 +742,9 @@ eval "$(talaria completion zsh)"    # zsh
 
 ## Configuration
 
-Talaria reads no configuration files itself. Every input is a CLI flag or environment variable.
+Talaria has no separate application configuration file. Commands read the
+selected Hermes profile's configuration and artifacts as needed; CLI flags and
+environment variables select paths and per-run options.
 
 | Var | Effect |
 |-----|--------|
@@ -746,7 +763,12 @@ Talaria reads no configuration files itself. Every input is a CLI flag or enviro
 
 ## Adding a new feature
 
-Talaria has two feature groups plus a configuration command group. Inspection features live under `talaria/hermes/` (read-only against `state.db` and `logs/`). Sync phases live under `talaria/sync/` (the write-bearing carve-out; copies profile artefacts between profiles). Single-profile configuration features also live under `talaria/hermes/` when they operate on one profile's own files.
+Talaria has `hermes`, `skills`, and `config` command groups. Hermes-specific
+features live under `src/talaria/hermes/`; sync phases live under
+`src/talaria/sync/`. Single-profile config helpers also live under `hermes/`.
+Read the applicable DOX chain and [record contracts](docs/product/README.md)
+first. Material behaviour changes require an owning CHG, affected CAP updates,
+and executable evidence in the same change.
 
 1. Add `talaria/hermes/<feature>.py` exposing `run(paths, **opts) -> dict` and `render_human(report) -> tuple[int, str]`.
 2. Wire its argparse subparser into `talaria.cli.build_parser`. The feature's **output tier** decides the dispatch shape:
@@ -758,17 +780,35 @@ Talaria has two feature groups plus a configuration command group. Inspection fe
 ## Development
 
 ```bash
-# install (uv recommended — repo ships a uv.lock)
-uv sync && uv pip install -e ".[dev]"
+# install application and test dependencies from uv.lock
+uv sync --locked --extra dev
 
 # run the full test suite (no live Hermes or network required by default)
-pytest
+uv run --extra dev pytest
 
 # run just the benchmark feature tests
-pytest tests/test_benchmark.py
+uv run --extra dev pytest tests/test_benchmark.py
+
+# build sdist and wheel
+uv build
+
+# Node 24: development-only record checks; no npm/pnpm install required
+node scripts/check-product-records.mjs
+node --test tests/records/*.test.mjs
 ```
 
-The default test suite uses an in-memory SQLite `sessions` table and tmpdir logs — no live Hermes install is required. Network-bound tests stub `urllib.request.urlopen`; no real Kilo Code or GitHub calls happen during `pytest`.
+The default test suite uses synthetic profiles, temporary SQLite databases and
+logs, and mocked network/model/process actions. Model configuration checks use
+`tests/fixtures/model-profile.yaml` unless explicitly overridden; no live Hermes
+install is required. CI forces `_TESTING_TALARIA_SKIP_MODEL_BENCH=1` and runs the
+same tests, build, and record gates on Python 3.10 and 3.14. Node is not required
+to install or run Talaria. No lint/type-check gate is configured.
+
+The [product index](docs/product/index.md) links current capabilities to source
+and tests. [Active CHGs](docs/changes/README.md#current-records) track material
+implementation requests; archived CHGs are receipts, not product specifications.
+The validator checks structure and references, not whether a claim is true or
+whether its cited tests actually ran.
 
 The **live model benchmark** (smoke + vision calls against real models via `hermes chat`) is gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` and skipped by default to avoid burning tokens. The vision fixtures (`assets/benchmark/vision/`) are checked into the repo; regenerate them with `uv run python assets/benchmark/vision/generate_vision_fixtures.py` (requires the `pillow` dev dependency).
 

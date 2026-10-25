@@ -2,14 +2,10 @@
 
 ## Purpose
 
-The **sync** feature group is Talaria's write-bearing carve-out:
-copying Hermes profile artefacts (config.yaml, SOUL.md, skills/,
-.env, context_length_cache.yaml) from a source profile to a target
-profile. Every other Talaria feature is read-only against the
-Hermes runtime; sync is the operator-facing counterpart that
-makes those inspections worth running by letting the operator
-propagate fixes, additions, and shared configurations across
-profiles.
+The **sync** feature group copies Hermes profile artefacts (config.yaml, SOUL.md, skills/,
+.env, context_length_cache.yaml, auth.json) into a target profile.
+It propagates shared configuration; other maintenance commands have their
+own write contracts. The auth phase selects newest tokens across profiles.
 
 ## Ownership
 
@@ -38,8 +34,8 @@ profiles.
 - Public surface: `talaria.sync.run.run_sync(source, target, options)`
   and `talaria.sync.run.run_mcp_serve(target, options)`. The CLI
   imports these — phase modules are private.
-- Sync WRITES to profiles. This is the only Talaria feature group
-  that does; the read-only contract elsewhere is unchanged.
+- Sync WRITES to profiles by default. Use `--dry-run` to preview; never
+  infer the defaults of other commands from this group.
 - Writes go through `writer.write_with_backup` (atomic temp +
   rename, optional `.bak`). Direct `Path.write_text` calls in
   phase modules are a code smell.
@@ -108,11 +104,8 @@ profiles.
 - `mcp_serve.py` — `mcp_servers` injection (delegates to
   `config.py`). Writes an `mcp_servers:<name>` block into the
   target's `config.yaml` pointing at `http://<host>:<port>/sse`
-  with `transport: sse`. The operator-side MCP proxy that
-  actually serves that URL lives outside this repo; see
-  `docs/MCP-PROXY.md` for the matching spec (target:
-  `~/.hermes/profiles/hermes-vc/bin/mcp_reverse_proxy.py`, port
-  8000).
+  with `transport: sse`. The server actually serving that URL is external;
+  this package only writes the connection configuration.
 - `dotpath.py` — get/set/del/list helpers for `--exclude` /
   `--only` path filters.
 - `yaml_io.py` — load/dump/validate YAML.

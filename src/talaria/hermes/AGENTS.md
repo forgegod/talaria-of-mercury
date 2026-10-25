@@ -22,7 +22,8 @@ caches.
   `config.yaml`, aggregates recent sessions from `state.db`, enriches
   with capability data from `models_dev_cache.json`, and makes one
   cached JSON smoke call per model when the cache is stale (default
-  TTL 30 min). The report is read-only. Surfaced as
+  TTL 30 min). State reads are read-only; model calls and cache writes
+  are separate side effects. Surfaced as
   `talaria hermes benchmark`.
 - `doctor_llm` is the only place the doctor feature talks to a
   language model. **Nothing is hardcoded** — the module resolves
@@ -94,8 +95,8 @@ caches.
   what to fix (filesystem-only orphans, lock-only orphans,
   `skills.disabled` orphans) and all default to OFF; the bare command
   is a no-op. `--apply` is required to execute — without it, the tool
-  previews every planned action and exits 0. The default is `--no-backup`
-  / dry-run behaviour; passes are atomic with a `.bak` snapshot for
+  previews every planned action and exits 0. Applied writes create backups
+  unless `--no-backup` is supplied, with a `.bak` snapshot for
   `lock.json` and via `talaria.sync.writer.write_with_backup` for
   `config.yaml`. Cross-profile prune (e.g. deleting the default
   `<hermes_root>/skills/` once every default-skill is shadowed by a
@@ -126,8 +127,8 @@ caches.
   concurrently and a shift would race them. The tool is
   **explicit-only**: with no prune/rotate flags (`--max-size`,
   `--max-age`, `--max-total`) the file system is never touched and
-  the report's `dry_run` field is true regardless of `--apply`; with
-  at least one flag set, `--apply` is the default and `--dry-run`
+  the report's `dry_run` field is true; with
+  at least one flag set, applying is the default and `--dry-run`
   previews. The displayed default values (10 MiB gziped per file,
   30 days, 50 MiB total, keep 1) are not implicit limits — they are
   documentation of sensible values the operator can pass.
@@ -190,6 +191,9 @@ caches.
   matches on `WARNING|ERROR|CRITICAL` lines, never INFO. The
   `STREAM_DROP_PATTERN` count is reported separately and never triggers
   the alert.
+- Normalize the log timestamp's comma fractional separator before ISO parsing;
+  Python 3.10 does not accept it directly. Keep severity and time-window
+  filtering unchanged across supported Python versions.
 - Reports must include `fired: bool` so JSON consumers can branch on the
   exit signal without parsing human output. The `selected_detectors`
   list names every detector that ran; `skipped_detectors` names every
@@ -204,7 +208,7 @@ caches.
   emitted: `free_flight:anomaly:<slug>` (fired iff severity is
   warn/alert) and `free_flight:config:<slug>` (never fired; the
   operator decides whether to apply). A `free_flight` field in the
-  report summarises findings_count / fired_count / token_budget.
+  report summarises findings_count / fired_count / log_lines / timeout_seconds.
   The curator model is resolved from the profile config via
   `resolve_curator_config(paths)` and invoked as `hermes_chat(prompt,
   model=..., provider=..., timeout=...)`. A model failure /
@@ -244,10 +248,9 @@ caches.
   are a security bug; false positives only erase legitimate
   config (safe). The redacted config is inlined into the prompt;
   the raw config is never handed to the model via `@file:`.
-- `doctor_free_flight` enforces a token budget (default 100k) by
-  trimming sessions tail-first; whole sessions are dropped, never
-  partially. A budget of 0 disables the pass entirely (skipped
-  detector result).
+- `doctor_free_flight` bounds log inclusion with `log_lines` (default 200
+  per file) and a subprocess timeout (default 180 seconds). Nonpositive
+  `log_lines` skips the pass; there is no token-budget parameter.
 - `doctor.apply_config_suggestions()` reuses the
   :func:`talaria.sync.writer.write_with_backup` atomic backup
   writer plus :mod:`talaria.sync.yaml_io` for safe YAML round-trip. Each
@@ -287,9 +290,9 @@ caches.
   bytes are written. `--apply` flips every selected tactical
   flag into its write path; the per-action `dry_run` field
   records which side actually ran. The explicit-consent default
-  (preview-by-default, write-on-`--apply`) matches the rest of
-  Talaria's destructive-write tools: `talaria skills prune`,
-  `talaria config sync`, `talaria hermes log-rotate`. Flags are
+  (preview-by-default, write-on-`--apply`) matches `talaria skills prune`.
+  Sync applies by default; log rotation applies supplied limits unless
+  `--dry-run`. Flags are
   independent — a doctor invocation can run any subset, and
   unselected actions return `{"selected": False}` so consumers
   can iterate `TACTICAL_ACTION_IDS` without conditional key
@@ -304,11 +307,10 @@ caches.
   anomalies, skill_index_drift, and the unused-not-yet-flagged
   free-flight anomaly class) stay diagnostic because they need
   human context to fix correctly.
-- The canonical operator-facing detector catalog (id, what it
-  checks, threshold, severity, where it queries) is the
-  `Detector catalog` table below. The same data is also surfaced
-  via `talaria hermes doctor --show-resolution` for machines.
-  Keep both in sync when detectors are added or thresholds change.
+- The operator-facing detector table below describes the detector set.
+  `--show-resolution` exposes all twelve `detector_ids`, but its descriptive
+  `detector_catalog` currently omits `skill_index_drift`. Do not treat that
+  descriptive block as a complete inventory; see CAP-002 for the boundary.
 
 ### Detector catalog
 
@@ -348,7 +350,7 @@ its findings (anomaly + config_suggestion) are emitted under the
   `$XDG_CACHE_HOME/talaria/benchmark-cache-<profile>.json` and is
   keyed by `model--provider` for smoke and
   `<model_id>::vision::<fixture_label>` for vision. Smoke calls are
-  suppressed with `--no-smoke` (state.db-only report); vision calls
+  suppressed with `--no-smoke` (vision remains independent); vision calls
   are suppressed with `--no-vision` (default: vision enabled for
   every model whose capabilities include vision per models.dev).
   `--ttl` controls the cache freshness window for both (default
@@ -479,14 +481,15 @@ its findings (anomaly + config_suggestion) are emitted under the
   module.
 - Feature-specific constants (regexes, thresholds, default windows) live at
   the top of the module.
-- Network I/O is allowed only for catalog refresh. `refresh_catalog.fetch_catalog`
-  does the fetch + reshape + write path inside the Python CLI.
+- Network I/O belongs to explicit integration paths: catalog refresh,
+  skill identifier/frontmatter discovery and Hermes skill subprocesses,
+  plus doctor/benchmark model subprocesses. Stub these in offline tests.
 - Skill install/uninstall must delegate actual semantics to `hermes skills
   install` / `hermes skills uninstall`; do not vendor or copy Hermes' hub
   installer into Talaria. Note: `hermes skills uninstall` takes a skill
   *name*, not an identifier — reduce each expanded identifier to its
   trailing component before delegation. `hermes skills uninstall` has no
-  `hermes skills uninstall` has no `--yes` flag (unlike install) and prompts on stdin; the uninstaller must
+  `--yes` flag (unlike install) and prompts on stdin; the uninstaller must
   feed confirmation non-interactively and detect Hermes' false-zero-rc
   failures via stdout markers (see `default_uninstaller`).
   Both install and uninstall delegate to `hermes skills ...` subprocesses
@@ -598,11 +601,12 @@ its findings (anomaly + config_suggestion) are emitted under the
 
 ## Child DOX Index
 
-- `doctor.py` — multi-detector profile anomaly scan. Runs 11
+- `doctor.py` — multi-detector profile anomaly scan. Runs 12
   structured detectors (truncation_output, truncation_finish_reason,
   truncation_log_markers, stream_drops, compression_stale_locks,
   compression_failures, rewinds, handoff_errors, cost_anomalies,
-  zombie_sessions, ghost_sessions) against `state.db` and `logs/`,
+  zombie_sessions, ghost_sessions, skill_index_drift) against `state.db`,
+  `logs/`, and the skill registry,
   plus a default-on free-flight curator pass. Surfaced as
   `talaria hermes doctor`.
 - `benchmark.py` — per-model health/cost/latency/capability report.
@@ -624,7 +628,8 @@ its findings (anomaly + config_suggestion) are emitted under the
   overrides the fixture path. Smoke and vision calls run in parallel
   via `ThreadPoolExecutor` (default `DEFAULT_JOBS = 8`; `--jobs N` to
   tune, `--jobs 1` for sequential). Surfaced as
-  `talaria hermes benchmark`. Read-only.
+  `talaria hermes benchmark`. State reads are read-only; model calls and
+  benchmark-cache writes are side effects.
 - `doctor_llm.py` — curator-model subprocess runner. Resolves
   the curator model + provider from the profile config at runtime
   via `resolve_curator_config(paths)`, then calls
@@ -634,7 +639,7 @@ its findings (anomaly + config_suggestion) are emitted under the
 - `doctor_free_flight.py` — open-ended curator pass for the
   `doctor` command. Reads + redacts the profile's `config.yaml`
   via `_redact_raw_yaml`, inlines it into the prompt, references
-  log files + `state.db` via `@folder:` / `@file:` syntax. Resolves
+  logs via `@folder:` and temporary database slices by path. Resolves
   the curator model + provider from config at runtime (no
   hardcoding). Parses the curator response into findings of two
   kinds (`anomaly` + `config_suggestion`) and returns them as

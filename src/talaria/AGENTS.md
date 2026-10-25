@@ -24,10 +24,12 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   in the dispatcher layer (`src/talaria/cli/AGENTS.md`) and applies
   uniformly to every command group: `hermes`, `config`, `skills`.
 
-  Four carve-outs print by default with no `--verbose` needed, because
-  their only job is to print:
+  These carve-outs print by default with no `--verbose` needed:
 
   * `talaria paths` — its output *is* the resolved profile + paths.
+  * `talaria hermes doctor` and `talaria hermes benchmark` — reports
+    print unless `--quiet` is supplied.
+  * `talaria skills prune` — prints the reconciliation report.
   * `talaria hermes log-rotate` — explicit-only: with no action flags
     it reports scanned size/age and exits 0 without writing. The report
     is the answer.
@@ -35,8 +37,8 @@ The Talaria Python package — `talaria` CLI entry point and library code.
     operator asked for.
   * `talaria config sync --list` — its output *is* the dot-path list
     the operator asked for.
-- All filesystem and SQLite access is **read-only against the Hermes runtime**
-  for inspection features (`hermes doctor`, `paths`).
+- Diagnostic reads are read-only against the Hermes runtime, but commands
+  can expose separate write paths and model calls.
   Write-bearing carve-outs are explicit: `talaria config sync` copies profile
   artefacts between profiles, `talaria config apply-auxiliary` derives
   `model.aliases` from a profile's `auxiliary` block,
@@ -48,9 +50,13 @@ The Talaria Python package — `talaria` CLI entry point and library code.
   `--all-profiles`) per age and per-file/total size caps, and
   `talaria skills install` / `talaria skills uninstall` install or
   remove third-party skills then update that profile's
-  `skills.disabled` policy. None of the inspection features touches
-  `state.db`.
-- Every CLI subcommand must accept `--json` and a human-readable default renderer.
+  `skills.disabled` policy. Doctor tactical flags mutate `state.db` only
+  with `--apply`; curator suggestions require `--apply-curator-suggestions`.
+  Skill prune requires `--apply`; category creation applies by default.
+  Catalog refresh and benchmark write caches; serve-stop signals listeners.
+  See `docs/architecture.md` for command-specific side-effect boundaries.
+- Data-producing commands support JSON and human reports. Completion emits
+  shell code, not JSON; sync `--list` emits the requested paths.
 
 ## Work Guidance
 
@@ -68,6 +74,8 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Verification
 
 - `pytest` from the repo root must pass before any change is considered done.
+- Material behaviour changes also update their CAP and CHG under `docs/` and
+  pass `node scripts/check-product-records.mjs`; see the root record contract.
 - New feature modules must add a sibling `tests/test_<feature>.py` using the
   `fake_hermes_root` fixture from `tests/conftest.py` plus
   `tests/_helpers.make_sessions_db`.

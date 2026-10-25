@@ -82,9 +82,43 @@ Project-wide durable preferences (style, workflow, conventions) live in user mem
 
 - Documentation describes current project state only; git carries the timeline and retired designs.
 
+## Project purpose
+
+- Talaria is an installable maintenance CLI for Hermes Agent operators: diagnostics, model benchmarking, skill lifecycle management, profile configuration, and bounded maintenance actions.
+- Python source and packaging remain owned by `src/talaria/` and `pyproject.toml`; the console script is `talaria`, the distribution is `talaria-of-mercury`.
+- `README.md` owns operator usage. `docs/architecture.md` owns current cross-cutting design; CAPs own current material behaviour. None is a substitute for executable tests.
+
 ## Architectural decisions
 
 - **Agent harness protected by tirith.sh.** Reading passwords or access tokens is prohibited. Extract variables from `.env` / config files without relaying their values; use environment variables by importing them for Bash execution. `***` in output is a tirith redaction marker, not a literal value — never "fix" it to a variable ref.
+- **Runtime boundary.** Python with argparse, PyYAML, and psutil; Hermes remains an external CLI/runtime, not a vendored dependency. Node 24 is development-only record-validation tooling and is not required to install or run Talaria.
+- **Record authority.** `docs/product/capabilities/CAP-*.md` describes current material behaviour, linked to implementation and executable tests. Code and tests decide conflicts.
+- **Change authority.** `docs/changes/active/CHG-*.md` is the single implementation-progress authority for a material request. Tickets or direct operator requests explain why; archived CHGs are receipts, not current contracts.
+- **Material changes.** Update affected CAPs, behaviour tests, and the owning CHG together. Do not create CAP/CHG churn for behaviour-preserving refactors or framework initialization.
+- **Write boundaries.** Preview/apply defaults differ by command. Preserve the explicit contracts in `docs/architecture.md`; never assume all writes require `--apply` or that inspection commands cannot contact a model.
+- **Evidence isolation.** Default verification uses synthetic data and mocked external services, never an operator profile or live model. Live benchmarks require explicit opt-in; CI forces them off.
+
+## Architectural non-goals and change control
+
+- Talaria does not own the Hermes server, agent loop, model providers, or a web/TUI application.
+- Do not introduce a second progress tracker, vendor Hermes internals, or add a runtime service/database without explicit approval.
+- Approved cross-cutting changes update this rail, `docs/architecture.md`, affected child contracts/tests, and `docs/design-decisions.md` for durable architecture forks.
+
+## Product and change records
+
+- Read `docs/product/README.md` and `docs/changes/README.md` before creating, changing, splitting, or closing CAP/CHG records.
+- Every CAP declares `Primary surface: human` or `none`. Talaria's non-interactive text/JSON CLI has no primary visual screen, so current CAPs declare `none`; this is not an exemption for future visual interfaces.
+- CHG review assets belong in `docs/changes/reviews/CHG-<number>/`. Future primary visual surfaces require separate CAP-linked canonical HTML/PNG wireframes and a child DOX contract.
+- Optional installed `application-records` and `phased-plan-*` skills assist execution; repository contracts remain authoritative. Do not copy initializer packages or private progress files into the project.
+
+## Workspace verification
+
+- `uv sync --locked --extra dev` installs the project and test dependencies from `uv.lock`.
+- `uv run --extra dev pytest` runs the Python suite; CI additionally sets `_TESTING_TALARIA_SKIP_MODEL_BENCH=1`.
+- `uv build` builds the sdist and wheel.
+- `node scripts/check-product-records.mjs` validates CAP/CHG structure, lifecycle, references, review ownership, and activated wireframe inventory.
+- `node --test tests/records/*.test.mjs` exercises the validator with synthetic trees, including pytest evidence references.
+- `.github/workflows/ci.yml` runs these gates without credentials. Record validation is structural, not proof that claims are true or that tests ran. No lint/type-check gate is configured.
 
 ## Codebase Knowledge Graph (codebase-memory-mcp)
 
@@ -110,7 +144,11 @@ ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
 
 ## Child DOX Index
 
-- `src/talaria/` — Python package: CLI entry point, path resolution, Hermes features.
-- `tests/` — pytest suite with shared fixtures and helpers.
-- `assets/` — logo SVG sources + rendered PNG sizes.
-- `docs/` — implementation specifications for future Hermes Agent sessions. Each `*.md` file is a self-contained brief: problem + goal + design + verification + rollback. Files here describe **future work**, never the current state of `src/`.
+- `src/talaria/AGENTS.md` — Python package: CLI entry point, path resolution, Hermes features.
+- `tests/AGENTS.md` — pytest suite, synthetic fixtures, and validator-test child.
+- `assets/AGENTS.md` — logo sources, rendered PNGs, and benchmark vision fixtures.
+- `docs/AGENTS.md` — current architecture, product capability records, and change lifecycle.
+- `scripts/AGENTS.md` — development-only record validator.
+- `.github/AGENTS.md` — credential-free GitHub Actions verification.
+
+Root owns `README.md`, `pyproject.toml`, `uv.lock`, `.gitignore`, and `LICENSE`.

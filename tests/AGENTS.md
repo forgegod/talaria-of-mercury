@@ -17,7 +17,10 @@ Pytest suite for the Talaria CLI and library.
   write-side reconcile (filesystem-only, lock-only, disabled-orphans
   prune classes, dry-run vs apply, renderer exit codes).
   `test_doctor_aux_models.py` is a live-model benchmark suite
-  gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1`.
+  whose live calls are gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1`;
+  offline configuration checks use `fixtures/model-profile.yaml`.
+- `records/` owns dependency-free Node validator fixture suites under its
+  own child contract. These are not pytest tests.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
   `_helpers.py` (importable, not auto-discovered by pytest). Vision
   fixture images live in `assets/benchmark/vision/` (see
@@ -30,6 +33,12 @@ Pytest suite for the Talaria CLI and library.
 - CLI tests must use `subprocess.run([sys.executable, "-m", "talaria.cli", ...])`
   — invoking the entry point proves the installed CLI surface works, not
   just the library functions.
+- Resolve checkout paths from `__file__`, never an operator's absolute home.
+  Process-discovery CLI tests must use `--dry-run`; actual signaling is
+  tested with mocked processes, never a presumed-unused host port.
+- Offline model tests use synthetic `fixtures/model-profile.yaml`, including
+  during collection. An explicit profile-config override is operator-selected;
+  real model calls still require opt-in and must remain force-disabled in CI.
 - `tests/__init__.py` exists so Pyright/pytest can import from `tests._helpers`.
 - **Internal test env vars use the `_TESTING_TALARIA_*` prefix.** Any
   environment variable that controls pytest behaviour (opt-in/opt-out
@@ -60,6 +69,7 @@ Pytest suite for the Talaria CLI and library.
     `-q/--quiet` to assert on the silent (exit-code-only) path.
   * `talaria completion` and `talaria config sync --list` — the
     output is the answer the test asked for.
+  * `talaria skills prune` — reconciliation report prints by default.
 
 ## Work Guidance
 
@@ -73,11 +83,19 @@ Pytest suite for the Talaria CLI and library.
 
 ## Verification
 
-- `pytest` from the repo root must exit 0 before any change ships.
-- Coverage gaps: none tracked.
+- `uv run --extra dev pytest` from the repo root must exit 0 before changes ship.
+- `node --test tests/records/*.test.mjs` proves record validation; run
+  `node scripts/check-product-records.mjs` against the actual documentation too.
+- Live-model/provider integration remains opt-in, not covered by the offline gate.
 
 ## Child DOX Index
 
+- `records/AGENTS.md` — synthetic CAP/CHG validator suites and fixture helpers.
+
+### Test inventory (owned by this contract)
+
+- `fixtures/model-profile.yaml` — synthetic model routing data for offline
+  model-config checks; no credentials or usable provider endpoints.
 - `test_paths.py` — `talaria.paths` resolution precedence and the
   `talaria paths` CLI dispatch (default-prints contract).
 - `test_refresh_catalog.py` — reshape, credential discovery, cache
@@ -115,6 +133,8 @@ Pytest suite for the Talaria CLI and library.
   enumeration, run/render shape, `show_resolution` option echo,
   and CLI `--help`.
 - `test_doctor.py` — 12-detector doctor feature: per-detector
+  tests include deterministic comma-millisecond log parsing on the minimum
+  supported Python. The suite also covers
   tests (truncation_output, compression_stale_locks, zombie,
   ghost, rewind, cost_anomalies, skill_index_drift, etc.),
   orchestrator selection (`--only`/`--skip`), error isolation,
@@ -146,8 +166,7 @@ Pytest suite for the Talaria CLI and library.
 - `test_doctor_aux_models.py` — live-model benchmark suite with
   **deduplicated discovery**. Walks `model.default`, every
   `model.aliases` entry, and every `auxiliary.<usecase>.model` block
-  to build a set of unique `(model, provider)` pairs (50 config
-  references → 19 unique pairs in the live vc-client profile). Each
+  to build a set of unique `(model, provider)` pairs. Each
   pair is benchmarked once via `hermes chat -q` with a JSON smoke
   prompt. Gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` (opt-in)
   with `_TESTING_TALARIA_SKIP_MODEL_BENCH=1` (opt-out, wins over
@@ -157,7 +176,10 @@ Pytest suite for the Talaria CLI and library.
   `talaria.hermes.benchmark.run` with `vision=True` against the
   live profile, and deterministic config-invariant checks (YAML
   parse, required aliases, non-empty model ids, model.default set,
-  discovery finds ≥1 target) that always run. Vision capability is
+  discovery finds ≥1 target) that use the synthetic fixture by default.
+  `TestOfflineConfigSelection` proves default/force-skipped synthetic selection,
+  explicit override precedence, and deduplicated fixture model discovery.
+  Vision capability is
   no longer tested as a standalone parametrized test — it is part
   of the `talaria hermes benchmark` feature (see `test_benchmark.py`
   for unit coverage).

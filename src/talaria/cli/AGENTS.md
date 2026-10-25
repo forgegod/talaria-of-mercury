@@ -21,7 +21,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   external code.
 - `talaria config sync` is a flat subcommand under the `config` command
   group (no nested subsubparser): it takes `<source>` and optional
-  `<target>`, plus flags that select/configure the five sync phases and
+  `<target>`, plus flags that select/configure the six sync phases and
   the `--add-mcp-serve` injection. Defaults to apply-by-default;
   `--dry-run` opts out.
 - `talaria config apply-auxiliary` is the sibling command under
@@ -72,8 +72,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   addition to it: `--verbose` enables both the per-step progress stream
   and the final report print.
 
-  Carve-outs (do NOT add `-v/--verbose` to these — they print by default
-  because their only job is to print):
+  Carve-outs (print by default; preserve existing flag support):
 
   * `talaria paths` (`cmd_paths`) — its output is the resolved
     profile + paths. The CLI prints the four `key: value` lines on
@@ -89,6 +88,8 @@ Console-script entry point and argparse dispatch for the `talaria` command.
     nothing was done.
   * `talaria completion` (`cmd_completion`) — its sole output is
     the shell script. (Pre-existing exception.)
+  * `talaria skills prune` (`cmd_hermes_skills_prune`) — prints its reconciliation
+    report; `--json` selects the explicit data channel.
   * `talaria config sync --list` (the `--list` branch inside
     `cmd_sync`) — the operator asked for the dot-path list; that's
     the answer. (Pre-existing behaviour, intentionally not gated.)
@@ -111,10 +112,11 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   profile is reported — not consumed — by the feature itself. `refresh-catalog --gateway` selects the provider catalog/source/cache; `--profile` never does.
 - `talaria skills` is a top-level command group (sibling to `paths`,
   `hermes`, `config`) with `install`, `uninstall`, `create-category`,
-  and `prune` subcommands. The first three expand a skill identifier
+  and `prune` subcommands. Install and uninstall expand a skill identifier
   (recursive when it ends in `/*`), delegate each install/uninstall to
   the matching `hermes skills` subcommand, and update the profile's
-  `skills.disabled` policy. A non-wildcard identifier installs or
+  `skills.disabled` policy. `create-category` creates a category directory
+  and optional description locally. A non-wildcard identifier installs or
   uninstalls a single skill. The recursive behaviour is implicit —
   there is no separate recursive subcommand. `prune` reconciles drift
   between the on-disk skill walk, `<skills_root>/.hub/lock.json`, and
@@ -126,7 +128,7 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   :func:`talaria.hermes.skill_index.read_index` so their drift views
   agree.
 - `talaria hermes serve-stop` detects and stops the dashboard/serve backend
-  by its listening port (profile-agnostic, Linux-only). It takes `--port`,
+  by its listening port (profile-agnostic, psutil-based). It takes `--port`,
   `--dry-run`, `--json`, and `--show-resolution`. `--profile` is recorded in
   the report only and does not affect detection.
 - `talaria hermes log-rotate` rotates and prunes the active profile's
@@ -152,8 +154,8 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   to writing curator `config_suggestion` findings to `config.yaml`
   via the atomic backup writer — `config.yaml.bak` is written
   first), and `--dry-run` (preview the curator apply without
-  writing; implies `--apply-curator-suggestions` but suppresses
-  the write). The free-flight curator pass is **default-on**:
+  writing; also requests a suggestion preview without requiring the apply
+  flag). The free-flight curator pass is **default-on**:
   the whole point of `doctor` is to find inconsistencies the
   operator didn't anticipate, and the deterministic 12-detector
   pass only covers patterns the rules know to look for.
@@ -165,10 +167,9 @@ Console-script entry point and argparse dispatch for the `talaria` command.
   sessions within the look-back window that have zero `messages`
   rows). Each tactical flag defaults to **dry-run preview** — the
   shared `--apply` flag is the gate that turns preview into write.
-  This explicit-consent convention matches `talaria skills prune`,
-  `talaria config sync`, and `talaria hermes log-rotate`: every
-  destructive write to operator state (config.yaml, state.db,
-  lock.json, logs/) is opt-in via `--apply`. Tactical writes go
+  This preview-by-default convention matches `talaria skills prune`,
+  not sync or log rotation: sync applies unless `--dry-run`, and log
+  rotation applies supplied limits unless `--dry-run`. Tactical writes go
   directly to `state.db` via SQLite WAL — they do not create a
   `state.db.bak` (a partial-file backup of a live SQLite DB is
   unsafe; the operator's existing state.db backup regime is the
