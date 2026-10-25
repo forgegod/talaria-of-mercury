@@ -1831,6 +1831,16 @@ class TestDiscoverLogFiles:
 
 
 class TestScanLogTruncations:
+    def test_comma_millisecond_timestamp(self, tmp_path: Path) -> None:
+        when = datetime(2026, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+        log = tmp_path / "agent.log"
+        log.write_text(
+            "2026-01-02 12:00:00,123 WARNING agent: finish_reason='length'\n"
+        )
+        result = doctor.scan_log_truncations([log], when.timestamp())
+        assert result["length_class_hits"] == 1
+        assert result["matches"][0]["file"] == "agent.log"
+
     def test_no_log_files_ok(self) -> None:
         result = doctor.scan_log_truncations([], 0.0)
         assert result["ok"] is True

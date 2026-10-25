@@ -210,7 +210,8 @@ def scan_log_truncations(
                 if len(line) < 20 or line[4] != "-" or line[7] != "-":
                     continue
                 try:
-                    line_ts = datetime.fromisoformat(line[:23]).replace(
+                    # Python 3.10 requires a dot for fractional seconds.
+                    line_ts = datetime.fromisoformat(line[:23].replace(",", ".")).replace(
                         tzinfo=timezone.utc,
                     ).timestamp()
                 except ValueError:
