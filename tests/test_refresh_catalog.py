@@ -29,6 +29,10 @@ import pytest
 from talaria.hermes import refresh_catalog
 from talaria.paths import ResolvedPaths
 
+#: Repository root — CLI subprocess tests run from here so they never
+#: depend on the checkout's absolute location on the host.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # ---------- Helpers ----------
 
 def _sample_payload() -> dict:
@@ -535,7 +539,7 @@ class TestCli:
     def test_help_exits_zero(self) -> None:
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "refresh-catalog", "--help"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         assert "kilocode" in result.stdout.lower()
@@ -544,7 +548,7 @@ class TestCli:
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "refresh-catalog",
              "--dst", "/tmp/x.json", "--show-resolution"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         payload = json.loads(result.stdout)
@@ -558,7 +562,7 @@ class TestCli:
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "refresh-catalog",
              "--gateway", "kilo", "--show-resolution"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 2
         assert "invalid choice" in result.stderr
@@ -573,7 +577,7 @@ class TestCli:
             [sys.executable, "-m", "talaria.cli", "hermes", "refresh-catalog",
              "--dst", str(tmp_path / "out.json"), "--json"],
             capture_output=True, text=True,
-            env=env, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            env=env, cwd=REPO_ROOT,
         )
         assert result.returncode == 2
         payload = json.loads(result.stdout)

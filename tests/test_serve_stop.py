@@ -14,15 +14,21 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 from collections import namedtuple
+from pathlib import Path
 
 import psutil
 import pytest
 
 from talaria.hermes import serve_stop
 from talaria.paths import ResolvedPaths
+
+#: Repository root — CLI subprocess tests run from here so they never
+#: depend on the checkout's absolute location on the host.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------- Helpers ----------
@@ -295,7 +301,7 @@ class TestCli:
     def test_help_exits_zero(self) -> None:
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "serve-stop", "--help"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         assert "9119" in result.stdout
@@ -305,7 +311,7 @@ class TestCli:
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "serve-stop",
              "--port", "9119", "--show-resolution"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         payload = json.loads(result.stdout)
@@ -314,24 +320,32 @@ class TestCli:
         assert "graceful_timeout_seconds" in payload
 
     def test_json_none_when_port_silent(self) -> None:
-        # Use an unlikely-to-be-bound port.
-        result = subprocess.run(
-            [sys.executable, "-m", "talaria.cli", "hermes", "serve-stop",
-             "--port", "39998", "--json"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
-        )
+        # Hold an ephemeral port bound but NOT listening for the whole call:
+        # nothing can LISTEN there (psutil reports it as status NONE, so
+        # serve_stop sees no backend), and no other process can grab it
+        # mid-test. --dry-run keeps the CLI from signalling in any case.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as holder:
+            holder.bind(("127.0.0.1", 0))
+            port = holder.getsockname()[1]
+            result = subprocess.run(
+                [sys.executable, "-m", "talaria.cli", "hermes", "serve-stop",
+                 "--port", str(port), "--dry-run", "--json"],
+                capture_output=True, text=True, cwd=REPO_ROOT,
+            )
         assert result.returncode == 0
         payload = json.loads(result.stdout)
         assert payload["ok"] is True
         assert payload["reason"] == "none"
-        assert payload["port"] == 39998
+        assert payload["port"] == port
+        assert payload["found_pids"] == []
+        assert payload["stopped_pids"] == []
 
     def test_dry_run_does_not_kill(self) -> None:
         # --dry-run must never send a signal even if something is listening.
         result = subprocess.run(
             [sys.executable, "-m", "talaria.cli", "hermes", "serve-stop",
              "--port", "39999", "--dry-run", "--json"],
-            capture_output=True, text=True, cwd="/home/raphael/src/rb/talaria-of-mercury",
+            capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert result.returncode == 0
         payload = json.loads(result.stdout)

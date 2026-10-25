@@ -1,0 +1,43 @@
+# Synthetic model profile for offline test runs (tests/test_doctor_aux_models.py).
+# Dummy model ids only: no real profile, account, or credential data.
+#
+# Contract (asserted by the suite):
+#   * every required internal alias in TestConfigInvariants is present with a non-empty id
+#   * model.default is set
+#   * auxiliary.curator.model == model.aliases._curator (curator parity)
+#   * discovery yields exactly four unique (model, provider) pairs:
+#       - fixture/main-chat      via fixture     (model.default)
+#       - fixture/small-utility  via fixture     (12 aliases incl. _curator/_compression, plus auxiliary.curator/compression; dedup)
+#       - fixture/vision-model   via fixture     (_vision alias + auxiliary.vision)
+#       - fixture/alt-extract    via fixture-alt (_web_extract provider from auxiliary.web_extract)
+provider: fixture
+model:
+  default: fixture/main-chat
+  aliases:
+    _curator: fixture/small-utility
+    _compression: fixture/small-utility
+    _vision: fixture/vision-model
+    _flush_memories: fixture/small-utility
+    _goal_judge: fixture/small-utility
+    _triage_specifier: fixture/small-utility
+    _kanban_decomposer: fixture/small-utility
+    _mcp: fixture/small-utility
+    _monitor: fixture/small-utility
+    _session_search: fixture/small-utility
+    _skills_hub: fixture/small-utility
+    _title_generation: fixture/small-utility
+    _tts_audio_tags: fixture/small-utility
+    _web_extract: fixture/alt-extract
+auxiliary:
+  curator:
+    provider: fixture
+    model: fixture/small-utility
+  compression:
+    provider: fixture
+    model: fixture/small-utility
+  vision:
+    provider: fixture
+    model: fixture/vision-model
+  web_extract:
+    provider: fixture-alt
+    model: fixture/alt-extract

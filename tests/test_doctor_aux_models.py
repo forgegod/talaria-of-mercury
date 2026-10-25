@@ -28,6 +28,9 @@ Design principles:
    sticky but the network is offline). Opt-out wins. Both follow
    the ``_TESTING_TALARIA_*`` prefix rule for internal test env
    vars (see ``tests/AGENTS.md`` §Local Contracts).
+   Without an opt-in (or with the opt-out set) every config read uses
+   the synthetic ``fixtures/model-profile.yaml``; the live profile is
+   never probed.
 
 4. **Vision is separate.** The vision-capability benchmark needs
    image input (``--image``), so it cannot share the text-only
@@ -45,6 +48,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any
 from pathlib import Path
@@ -67,22 +71,46 @@ BENCH_RESULTS = Path("/tmp/talaria-model-bench.json")
 
 # ---------------- Config helpers ----------------
 
-def _live_config_path() -> Path:
-    """Return the path to the live config, or skip the test.
+#: Synthetic profile used whenever live calls are not opted in. Dummy
+#: model ids only; contract documented in ``fixtures/model-profile.yaml``.
+SYNTHETIC_PROFILE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "model-profile.yaml"
 
-    Override with ``_TESTING_TALARIA_PROFILE_CONFIG=...`` for
-    hermes-free CI runs.
+#: The operator's live vc-client profile. Read only when live calls are
+#: opted in (see ``_live_config_path``); never probed or read otherwise.
+LIVE_PROFILE_CONFIG = Path("/home/raphael/.hermes/profiles/vc-client/config.yaml")
+
+
+def _live_calls_opted_in() -> bool:
+    """True iff live model calls are opted in and not force-skipped.
+
+    Read from the environment at call time, not import time, so the
+    offline selection can be tested with ``monkeypatch``.
+    """
+    if os.environ.get("_TESTING_TALARIA_SKIP_MODEL_BENCH"):
+        return False
+    return bool(os.environ.get("_TESTING_TALARIA_RUN_MODEL_BENCH"))
+
+
+def _live_config_path() -> Path:
+    """Return the model-profile config the suite reads.
+
+    * ``_TESTING_TALARIA_PROFILE_CONFIG=...``: explicit override; always wins.
+    * Live calls opted in and not force-skipped: the live vc-client
+      profile (skips the test if it is absent).
+    * Otherwise: the synthetic repository fixture. The live profile is
+      not probed, so default runs work on hosts without it.
     """
     override = os.environ.get("_TESTING_TALARIA_PROFILE_CONFIG")
     if override:
         return Path(override)
-    candidate = Path("/home/raphael/.hermes/profiles/vc-client/config.yaml")
-    if not candidate.exists():
+    if not _live_calls_opted_in():
+        return SYNTHETIC_PROFILE_CONFIG
+    if not LIVE_PROFILE_CONFIG.exists():
         pytest.skip(
-            f"no live config at {candidate} and no "
+            f"no live config at {LIVE_PROFILE_CONFIG} and no "
             f"_TESTING_TALARIA_PROFILE_CONFIG override"
         )
-    return candidate
+    return LIVE_PROFILE_CONFIG
 
 
 def _load_config() -> dict[str, Any]:
@@ -453,3 +481,60 @@ class TestConfigInvariants:
             "either model.default, model.aliases, or auxiliary.* must "
             "define at least one model"
         )
+
+
+# ---------------- Offline config selection (regression) ----------------
+
+_LIVE_GATE_VARS = (
+    "_TESTING_TALARIA_RUN_MODEL_BENCH",
+    "_TESTING_TALARIA_SKIP_MODEL_BENCH",
+    "_TESTING_TALARIA_PROFILE_CONFIG",
+)
+
+
+class TestOfflineConfigSelection:
+    """Without an authorized opt-in, the suite reads only the synthetic fixture.
+
+    Regression: ``_live_config_path`` used to return the operator's real
+    vc-client profile with live calls disabled, and collection read it.
+    """
+
+    @pytest.fixture
+    def offline(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in _LIVE_GATE_VARS:
+            monkeypatch.delenv(var, raising=False)
+
+    def test_default_selects_synthetic_fixture(self, offline: None) -> None:
+        assert _live_config_path() == SYNTHETIC_PROFILE_CONFIG
+
+    def test_force_skip_wins_over_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("_TESTING_TALARIA_RUN_MODEL_BENCH", "1")
+        monkeypatch.setenv("_TESTING_TALARIA_SKIP_MODEL_BENCH", "1")
+        monkeypatch.delenv("_TESTING_TALARIA_PROFILE_CONFIG", raising=False)
+        assert _live_config_path() == SYNTHETIC_PROFILE_CONFIG
+
+    def test_live_profile_is_never_consulted_offline(
+        self, offline: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        live = tmp_path / "config.yaml"
+        live.write_text("model:\n  default: LIVE-ONLY-MODEL\n")
+        monkeypatch.setattr(sys.modules[__name__], "LIVE_PROFILE_CONFIG", live)
+        assert _live_config_path() == SYNTHETIC_PROFILE_CONFIG
+        models = {t.model for t in discover_model_targets(_load_config())}
+        assert "LIVE-ONLY-MODEL" not in models
+
+    def test_fixture_discovery_pairs(self, offline: None) -> None:
+        pairs = {(t.model, t.provider) for t in discover_model_targets(_load_config())}
+        assert pairs == {
+            ("fixture/main-chat", "fixture"),
+            ("fixture/small-utility", "fixture"),
+            ("fixture/vision-model", "fixture"),
+            ("fixture/alt-extract", "fixture-alt"),
+        }
+
+    def test_explicit_override_still_wins(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        override = tmp_path / "override.yaml"
+        monkeypatch.setenv("_TESTING_TALARIA_PROFILE_CONFIG", str(override))
+        assert _live_config_path() == override
