@@ -47,13 +47,13 @@ Install Talaria as a normal user-level application with an isolated environment:
 
 ```bash
 # from a clone of this repo
-uv tool install --from . talaria
+uv tool install --from . talaria-of-mercury
 
 # update the installation after changing or pulling the local source
-uv tool install --force --from . talaria
+uv tool install --force --from . talaria-of-mercury
 
 # uninstall
-uv tool uninstall talaria
+uv tool uninstall talaria-of-mercury
 ```
 
 `uv` installs the executable at `~/.local/bin/talaria`; ensure `~/.local/bin` is
