@@ -6,8 +6,8 @@ The normalization and regression already exist; do not reimplement them.
 Prior local results are preserved in [evidence](evidence.md). This list tracks
 remaining verification and review without asserting integration or closure.
 
-- [ ] 1.1 Verify normalization and deterministic regression against current source; run the full suite on Python 3.10 and 3.14 with synthetic inputs and live calls disabled.
-- [ ] 1.2 Run `uv build`, `node scripts/check-openspec.mjs`, OpenSpec 1.15.0 `validate --all --strict`, `node --test tests/records/*.test.mjs`, and `git diff --check` on the final local candidate.
+- [x] 1.1 Verify normalization and deterministic regression against current source; run the full suite on Python 3.10 and 3.14 with synthetic inputs and live calls disabled.
+- [x] 1.2 Run `uv build`, `node scripts/check-openspec.mjs`, OpenSpec 1.15.0 `validate --all --strict`, `node --test tests/records/*.test.mjs`, and `git diff --check` on the final local candidate.
 
 ## 2. Independent candidate review
 

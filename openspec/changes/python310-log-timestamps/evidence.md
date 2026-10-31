@@ -27,3 +27,24 @@ missing authorized independent review or integrated-revision verification.
 The behavioral regression uses `2026-01-02 12:00:00,123 WARNING agent:
 finish_reason='length'` with a fixed UTC window in `tests/test_doctor.py`.
 This evidence document does not own task progress; see [tasks](tasks.md).
+
+## Current local reverification
+
+The uncommitted working tree based on `8b640c8` was reverified after replacing
+the superseded records and validator. Python runtime files, Python tests,
+`pyproject.toml` and `uv.lock` are unchanged from that base.
+
+- Full pytest suites on Python 3.10.20 and 3.14.7 each returned 574 passed,
+  5 skipped and 1 non-strict XPASS, exit 0. Each used a temporary HOME, unset
+  `_TESTING_TALARIA_PROFILE_CONFIG` and `_TESTING_TALARIA_RUN_MODEL_BENCH`, and
+  set `_TESTING_TALARIA_SKIP_MODEL_BENCH=1`.
+- `uv build` produced the wheel and source distribution successfully.
+- `node scripts/check-openspec.mjs` passed seven specs and one change package.
+- OpenSpec 1.15.0 `validate --all --strict` passed all eight items with
+  telemetry disabled and isolated HOME/XDG configuration.
+- `node --test tests/records/*.test.mjs` passed 105 tests with no failures.
+- `git diff --check` passed. Local Markdown links and preservation of every
+  original implementation/test file reference were checked separately.
+
+These are local working-tree results, not GitHub Actions, independent exact-SHA
+review, authorization to integrate, or an integrated acceptance receipt.
