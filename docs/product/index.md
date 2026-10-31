@@ -1,17 +1,15 @@
 # Talaria capabilities
 
-Current material behaviour at this repository revision. Code and executable tests
-decide conflicts; each record links its evidence and boundaries.
+Current material requirements at this repository revision. Code and executable
+tests decide conflicts; each specification links its evidence and boundaries.
 
-| Capability | Status |
-| --- | --- |
-| [CAP-001 — CLI entry point, profile resolution, and shell completion](capabilities/CAP-001-cli-entry-profile-resolution-completion.md) | implemented |
-| [CAP-002 — Doctor diagnostics and remediation](capabilities/CAP-002-doctor-diagnostics-remediation.md) | implemented |
-| [CAP-003 — Model benchmark](capabilities/CAP-003-model-benchmark.md) | implemented |
-| [CAP-004 — Hermes runtime maintenance: catalog, serve process, logs](capabilities/CAP-004-hermes-runtime-maintenance.md) | implemented |
-| [CAP-005 — Skill lifecycle](capabilities/CAP-005-skill-lifecycle.md) | implemented |
-| [CAP-006 — Profile sync](capabilities/CAP-006-profile-sync.md) | implemented |
-| [CAP-007 — Single-profile configuration helpers](capabilities/CAP-007-single-profile-config-helpers.md) | implemented |
+- [CLI entry point, profile resolution, and shell completion](../../openspec/specs/cli-entry-profile-resolution-completion/spec.md)
+- [Doctor diagnostics and remediation](../../openspec/specs/doctor-diagnostics-remediation/spec.md)
+- [Model benchmark](../../openspec/specs/model-benchmark/spec.md)
+- [Hermes runtime maintenance: catalog, serve process, logs](../../openspec/specs/hermes-runtime-maintenance/spec.md)
+- [Skill lifecycle](../../openspec/specs/skill-lifecycle/spec.md)
+- [Profile sync](../../openspec/specs/profile-sync/spec.md)
+- [Single-profile configuration helpers](../../openspec/specs/single-profile-config-helpers/spec.md)
 
-See [record rules](README.md), [architecture](../architecture.md), and
-[change progress](../changes/README.md).
+See [specifications and visuals](README.md), [architecture](../architecture.md),
+and [OpenSpec workflow](../openspec-workflow.md). Native `tasks.md` owns change progress.

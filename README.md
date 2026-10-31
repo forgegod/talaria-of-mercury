@@ -8,7 +8,7 @@
 
 Project contracts: [architecture](docs/architecture.md),
 [current capabilities](docs/product/index.md),
-[change workflow](docs/changes/README.md), and
+[OpenSpec workflow](docs/openspec-workflow.md), and
 [design decisions](docs/design-decisions.md).
 
 The name is deliberate. In the [Greek mythos](https://en.wikipedia.org/wiki/Talaria), the *talaria* were the winged sandals of Hermes: golden, swift, granted by Zeus, and worn by the messenger god to travel between mortal and divine realms. Hermes Agent carries his namesake's errands — tool calls, model swaps, subagent dispatch. Talaria carries its operator's errands: profile resolution, signal verification, and the verdict that tells you whether the agent is still flying cleanly or has begun to drag a wing.
@@ -766,9 +766,10 @@ environment variables select paths and per-run options.
 Talaria has `hermes`, `skills`, and `config` command groups. Hermes-specific
 features live under `src/talaria/hermes/`; sync phases live under
 `src/talaria/sync/`. Single-profile config helpers also live under `hermes/`.
-Read the applicable DOX chain and [record contracts](docs/product/README.md)
-first. Material behaviour changes require an owning CHG, affected CAP updates,
-and executable evidence in the same change.
+Read the applicable DOX chain and [OpenSpec workflow](docs/openspec-workflow.md)
+first. Material behaviour changes require a native change package, delta specs,
+and executable evidence; accepted requirements are synced into current specs.
+Only the orchestrator updates the change's `tasks.md` and Git.
 
 1. Add `talaria/hermes/<feature>.py` exposing `run(paths, **opts) -> dict` and `render_human(report) -> tuple[int, str]`.
 2. Wire its argparse subparser into `talaria.cli.build_parser`. The feature's **output tier** decides the dispatch shape:
@@ -792,23 +793,32 @@ uv run --extra dev pytest tests/test_benchmark.py
 # build sdist and wheel
 uv build
 
-# Node 24: development-only record checks; no npm/pnpm install required
-node scripts/check-product-records.mjs
+# Node 24: dependency-free local specification checks
+node scripts/check-openspec.mjs
 node --test tests/records/*.test.mjs
+
+# Separately installed OpenSpec 1.15.0: native strict validation
+openspec --version
+OPENSPEC_TELEMETRY=0 openspec validate --all --strict
 ```
 
 The default test suite uses synthetic profiles, temporary SQLite databases and
 logs, and mocked network/model/process actions. Model configuration checks use
 `tests/fixtures/model-profile.yaml` unless explicitly overridden; no live Hermes
 install is required. CI forces `_TESTING_TALARIA_SKIP_MODEL_BENCH=1` and runs the
-same tests, build, and record gates on Python 3.10 and 3.14. Node is not required
-to install or run Talaria. No lint/type-check gate is configured.
+same tests, build, and specification gates on Python 3.10 and 3.14. Node and
+OpenSpec are not required to install or run Talaria. CI installs the exact
+OpenSpec version into a job-local npm prefix; no Node application manifest or
+runtime dependency is added. See [tooling prerequisites](docs/openspec-workflow.md#tooling-and-installation-boundaries).
+No lint/type-check gate is configured.
 
 The [product index](docs/product/index.md) links current capabilities to source
-and tests. [Active CHGs](docs/changes/README.md#current-records) track material
-implementation requests; archived CHGs are receipts, not product specifications.
-The validator checks structure and references, not whether a claim is true or
-whether its cited tests actually ran.
+and tests. Native packages under `openspec/changes/` track material implementation
+requests in `tasks.md`; archives retain verified integrated evidence, not current
+requirements. Local validation checks structure and references, not whether a
+claim is true, cited tests ran, independent review occurred or integration was
+authorized. Native workflows and companions are separately installed in the
+selected agent user/profile scope; this checkout contains no host adapters.
 
 The **live model benchmark** (smoke + vision calls against real models via `hermes chat`) is gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1` and skipped by default to avoid burning tokens. The vision fixtures (`assets/benchmark/vision/`) are checked into the repo; regenerate them with `uv run python assets/benchmark/vision/generate_vision_fixtures.py` (requires the `pillow` dev dependency).
 

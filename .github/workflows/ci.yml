@@ -19,6 +19,7 @@ jobs:
         python-version: ['3.10', '3.14']
     env:
       _TESTING_TALARIA_SKIP_MODEL_BENCH: '1'
+      OPENSPEC_TELEMETRY: '0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -34,5 +35,11 @@ jobs:
       - run: uv sync --locked --extra dev --python "${{ matrix.python-version }}"
       - run: uv run --extra dev pytest
       - run: uv build
-      - run: node scripts/check-product-records.mjs
+      - name: Install development-only OpenSpec CLI
+        run: npm install --prefix "$RUNNER_TEMP/openspec" --no-save --package-lock=false --ignore-scripts --no-audit --no-fund @fission-ai/openspec@1.15.0
+      - name: Validate native OpenSpec artifacts
+        run: |
+          test "$("$RUNNER_TEMP/openspec/node_modules/.bin/openspec" --version)" = '1.15.0'
+          "$RUNNER_TEMP/openspec/node_modules/.bin/openspec" validate --all --strict
+      - run: node scripts/check-openspec.mjs
       - run: node --test tests/records/*.test.mjs

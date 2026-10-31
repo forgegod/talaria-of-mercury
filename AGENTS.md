@@ -1,7 +1,7 @@
 # DOX framework
 
-- DOX is highly performant AGENTS.md hierarchy installed here
-- Agent must follow DOX instructions across any edits
+- DOX is the AGENTS.md hierarchy installed in this repository.
+- Follow applicable DOX instructions for every edit.
 
 ## Core Contract
 
@@ -86,15 +86,16 @@ Project-wide durable preferences (style, workflow, conventions) live in user mem
 
 - Talaria is an installable maintenance CLI for Hermes Agent operators: diagnostics, model benchmarking, skill lifecycle management, profile configuration, and bounded maintenance actions.
 - Python source and packaging remain owned by `src/talaria/` and `pyproject.toml`; the console script is `talaria`, the distribution is `talaria-of-mercury`.
-- `README.md` owns operator usage. `docs/architecture.md` owns current cross-cutting design; CAPs own current material behaviour. None is a substitute for executable tests.
+- `README.md` owns operator usage. `docs/architecture.md` owns current cross-cutting design; `openspec/specs/` owns current material requirements. None is a substitute for executable tests.
 
 ## Architectural decisions
 
 - **Agent harness protected by tirith.sh.** Reading passwords or access tokens is prohibited. Extract variables from `.env` / config files without relaying their values; use environment variables by importing them for Bash execution. `***` in output is a tirith redaction marker, not a literal value — never "fix" it to a variable ref.
-- **Runtime boundary.** Python with argparse, PyYAML, and psutil; Hermes remains an external CLI/runtime, not a vendored dependency. Node 24 is development-only record-validation tooling and is not required to install or run Talaria.
-- **Record authority.** `docs/product/capabilities/CAP-*.md` describes current material behaviour, linked to implementation and executable tests. Code and tests decide conflicts.
-- **Change authority.** `docs/changes/active/CHG-*.md` is the single implementation-progress authority for a material request. Tickets or direct operator requests explain why; archived CHGs are receipts, not current contracts.
-- **Material changes.** Update affected CAPs, behaviour tests, and the owning CHG together. Do not create CAP/CHG churn for behaviour-preserving refactors or framework initialization.
+- **Runtime boundary.** Python with argparse, PyYAML, and psutil; Hermes remains an external CLI/runtime, not a vendored dependency. Node 24 and OpenSpec 1.15.0 are development-only tooling, not required to install or run Talaria. Keep Python packaging in `pyproject.toml` and `uv.lock`; do not add a Node application manifest.
+- **Specification authority.** `openspec/specs/<capability>/spec.md` describes current material requirements, linked to implementation and executable tests. Code and tests decide conflicts. OpenSpec owns native proposal, delta specs, design, tasks, sync, and archive; DOX owns repository instructions.
+- **Progress authority.** A change's native `tasks.md` is the sole mutable task list. Only its orchestrator writes tasks and Git; implementers report evidence and reviewers are read-only. Mediate stock apply's checkbox writes. Issues and PRs explain requests/review, not progress.
+- **Material changes.** Update change-owned delta specs, implementation, behaviour tests, and affected canonical visuals together. Sync accepted requirements into current specs before terminal closure. Behaviour-preserving maintenance does not churn requirements; initialization does not fabricate a change receipt.
+- **Completion.** Local validation is not integration. Before merge require independent review of the exact candidate SHA by a different session and model. Archive only after separately authorized integration, verification of the exact integrated revision, and factual Git-tracked evidence.
 - **Write boundaries.** Preview/apply defaults differ by command. Preserve the explicit contracts in `docs/architecture.md`; never assume all writes require `--apply` or that inspection commands cannot contact a model.
 - **Evidence isolation.** Default verification uses synthetic data and mocked external services, never an operator profile or live model. Live benchmarks require explicit opt-in; CI forces them off.
 
@@ -104,21 +105,24 @@ Project-wide durable preferences (style, workflow, conventions) live in user mem
 - Do not introduce a second progress tracker, vendor Hermes internals, or add a runtime service/database without explicit approval.
 - Approved cross-cutting changes update this rail, `docs/architecture.md`, affected child contracts/tests, and `docs/design-decisions.md` for durable architecture forks.
 
-## Product and change records
+## OpenSpec workflow
 
-- Read `docs/product/README.md` and `docs/changes/README.md` before creating, changing, splitting, or closing CAP/CHG records.
-- Every CAP declares `Primary surface: human` or `none`. Talaria's non-interactive text/JSON CLI has no primary visual screen, so current CAPs declare `none`; this is not an exemption for future visual interfaces.
-- CHG review assets belong in `docs/changes/reviews/CHG-<number>/`. Future primary visual surfaces require separate CAP-linked canonical HTML/PNG wireframes and a child DOX contract.
-- Optional installed `application-records` and `phased-plan-*` skills assist execution; repository contracts remain authoritative. Do not copy initializer packages or private progress files into the project.
+- Read `openspec/AGENTS.md` and `docs/openspec-workflow.md` before specification, implementation, sync, or archive. Do not maintain a second record/progress system.
+- Every current spec declares `Primary surface: human` or `none`. Talaria's non-interactive text/JSON CLI has no primary visual screen, so current specs declare `none`. Human-facing specs require canonical generated HTML/PNG under `docs/product/wireframes/`, keyed by capability and screen, with an owning child DOX. Proposal assets stay review-only inside their change package.
+- Follow the installed `openspec-delivery` naming/workspace procedure before new scaffolding: generate `<slug>-<lowercase-ulid>` once and reuse that identity on resume. Existing migrated names remain unchanged. Independent changes use agent-managed isolated workspaces; reconcile overlapping capability specs before integration.
+- `docs/openspec-workflow.md` selects bounded invocation authority. Proposals authorize local planning only; next/delivery advances one approved local task group; finish separately authorizes protected publication/integration and verified closeout. Plan approval and execution authority are distinct. Restrictions such as `no commits` persist. No release, force, bypass, direct target push, branch deletion, or unrelated change is implied.
+- Native OpenSpec workflows and externally owned `openspec-delivery`, `openspec-next`, `git-commit-message`, `capability-wireframes`, and separate `autonomous-implementation-review` have independent installation prerequisites. Do not vendor them, create project-local host adapters, or modify agent profiles during initialization.
+- Keep native headings and delta specs frontmatter-free; do not add workflow status, progress, approval, or PR metadata as another tracker. Keep `OPENSPEC_TELEMETRY=0` for verification.
 
 ## Workspace verification
 
 - `uv sync --locked --extra dev` installs the project and test dependencies from `uv.lock`.
 - `uv run --extra dev pytest` runs the Python suite; CI additionally sets `_TESTING_TALARIA_SKIP_MODEL_BENCH=1`.
 - `uv build` builds the sdist and wheel.
-- `node scripts/check-product-records.mjs` validates CAP/CHG structure, lifecycle, references, review ownership, and activated wireframe inventory.
+- `node scripts/check-openspec.mjs` validates specification/change structure, references, task ownership, and activated wireframe inventory.
+- `OPENSPEC_TELEMETRY=0 openspec validate --all --strict` runs upstream validation; `openspec --version` must report `1.15.0`.
 - `node --test tests/records/*.test.mjs` exercises the validator with synthetic trees, including pytest evidence references.
-- `.github/workflows/ci.yml` runs these gates without credentials. Record validation is structural, not proof that claims are true or that tests ran. No lint/type-check gate is configured.
+- `.github/workflows/ci.yml` runs these gates without credentials. Its OpenSpec installation is job-local, not part of Talaria packaging. Dependency installation may access public registries; verification itself is offline. Structural validation is not proof that claims are true or that tests ran. No lint/type-check gate is configured.
 
 ## Codebase Knowledge Graph (codebase-memory-mcp)
 
@@ -147,8 +151,9 @@ ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
 - `src/talaria/AGENTS.md` — Python package: CLI entry point, path resolution, Hermes features.
 - `tests/AGENTS.md` — pytest suite, synthetic fixtures, and validator-test child.
 - `assets/AGENTS.md` — logo sources, rendered PNGs, and benchmark vision fixtures.
-- `docs/AGENTS.md` — current architecture, product capability records, and change lifecycle.
-- `scripts/AGENTS.md` — development-only record validator.
+- `docs/AGENTS.md` — current architecture, capability navigation, and OpenSpec workflow.
+- `openspec/AGENTS.md` — current requirements, native change packages, and evidence.
+- `scripts/AGENTS.md` — development-only OpenSpec validator.
 - `.github/AGENTS.md` — credential-free GitHub Actions verification.
 
 Root owns `README.md`, `pyproject.toml`, `uv.lock`, `.gitignore`, and `LICENSE`.

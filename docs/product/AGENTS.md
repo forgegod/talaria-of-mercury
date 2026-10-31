@@ -1,40 +1,33 @@
-# Product capability records
+# Product navigation and canonical visuals
 
 ## Purpose
 
-Own the repository's concise, current-state account of material product behaviour and the executable evidence that proves it.
+Own navigation to current OpenSpec requirements and the optional canonical visual layer. Requirements and change progress live only under `../../openspec/`.
 
 ## Ownership
 
 | Path                    | Owns                                                                      |
 | ----------------------- | ------------------------------------------------------------------------- |
-| `README.md`             | Capability-record lifecycle, scope rule, metadata, and authoring templates. |
-| `index.md`              | Navigable catalogue of current capabilities without duplicating their behaviour. |
-| `capabilities/CAP-*.md` | One current behavioural contract per material capability.                 |
-| `wireframes/`           | Optional canonical product-visual layer, activated when any CAP declares `**Primary surface:** human` or the directory exists. |
+| `README.md` | Specification navigation and canonical visual contract. |
+| `index.md` | Links to current requirements without duplicating behavior or progress. |
+| `wireframes/` | Optional canonical visuals, activated by a human-facing spec or the directory's presence. |
 
 ## Local Contracts
 
-- A CAP document describes present behaviour at the repository revision, not a request, plan, or historical narrative.
-- A material claim links to the implementation and at least one executable behaviour test. Code and its tests decide a conflict; correct the CAP in the same change.
-- Capability-local decisions belong in the CAP; irreversible or cross-cutting decisions belong in `../design-decisions.md`.
-- Every CAP declares `Primary surface: human` or `none`. Human-facing CAPs require canonical HTML/PNG links under `## Links`; CAPs must not link CHG review packages.
-- Follow `README.md` for manifest activation and schema, inventory completeness, and the implementation handoff for new and existing CAPs. Generator and renderer freshness remain review gates, not inventory checks.
-- Optional externally installed phased-plan skills execute material work through its active CHG; the CAP remains the current-state contract rather than a phase-status surface. Talaria does not own their packages or installation.
+- Read `../../openspec/AGENTS.md` and `../openspec-workflow.md` for requirements and change lifecycle. Do not create a parallel record system here.
+- Current specs declare `Primary surface: human` or `none`. Human-facing specs link canonical HTML/PNG under `## Visuals`, never change-owned proposals.
+- `README.md` owns the optional manifest schema and inventory contract. Rendering freshness and honest classification remain review gates.
 
 ## Work Guidance
 
-- Add or amend a CAP in the same change as a material user-visible, operator-visible, or tool-behaviour change.
-- Do not create CAP churn for refactors that preserve observable behaviour.
-- Keep the index as links and status only; do not duplicate CAP prose.
-- Read `README.md` before creating or completing a CAP.
-- Read both the change and product DOX, plus the wireframe child if present, before choosing a destination for a visual artifact. Never move a pending proposal HTML, screenshot, or design prose into `wireframes/`: the canonical artifact is regenerated at implementation time.
+- Keep the index navigational; do not duplicate requirements or task status.
+- Read this contract and the OpenSpec contract before choosing a visual destination. Regenerate canonical artifacts at implementation time; never promote a proposal by moving files.
 
 ## Verification
 
-- Run `node scripts/check-product-records.mjs` and the affected behaviour tests.
-- Confirm every CAP declares a primary surface, that `human` CAPs link current wireframe HTML and PNG, and that the wireframe manifest agrees with the on-disk inventory whenever the workflow is active.
+- Run `node scripts/check-openspec.mjs`, pinned upstream strict validation, and affected behaviour tests.
+- When visuals activate, verify manifest/artifact/spec agreement and separately generate, render and inspect affected screens.
 
 ## Child DOX Index
 
-No child DOX documents while the wireframe workflow is inactive. Create and index the wireframe child contract on activation. Parent contract: `../AGENTS.md`; active implementation status: `../changes/AGENTS.md`.
+No child DOX documents while visuals are inactive. Create and index `wireframes/AGENTS.md` on activation. Parent: `../AGENTS.md`; specifications and changes: `../../openspec/AGENTS.md`.

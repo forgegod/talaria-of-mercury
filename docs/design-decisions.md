@@ -25,26 +25,39 @@ require explicit limits. Unifying these defaults would change the public CLI
 contract and is not a documentation cleanup. Atomic replacement and `.bak` apply
 to individual supported file writes, not whole profiles or live SQLite databases.
 
-## One authority for each kind of record
+## Native OpenSpec with DOX underneath
 
-CAPs describe current material behaviour with implementation/test evidence.
-Active CHGs own progress for material requested work; external requests explain
-why. Archived CHGs and review assets are receipts. This avoids competing truth
-in README prose, chat plans, and ticket status. Material changes update code,
-tests, CAPs, and CHGs together; behaviour-preserving maintenance does not require
-record churn. No retrospective change receipt is invented for initialization.
+DOX owns repository instructions. Native current specs own material requirements
+with implementation/test evidence. Native change packages own proposal, delta
+specs, design and `tasks.md`; only the orchestrator writes tasks and Git. Issues
+and PRs are request/review documents, not task mirrors. This avoids maintaining
+a bespoke lifecycle parser or competing progress systems. It also requires
+mediating native apply checkbox writes and reconciling shared-spec overlaps.
 
-## Record validation is development-only Node tooling
+Material changes evolve code, tests, deltas and affected visuals together;
+accepted requirements are synced before terminal closure. Behavior-preserving
+work does not churn requirements. Local validation is not integration: exact-SHA
+independent review, separately authorized integration, integrated gates and factual
+Git-tracked evidence precede archive. No setup change or retrospective integration
+receipt is invented during initialization. Existing unfinished work retains its
+evidence and pending acceptance rather than being implicitly closed.
 
-The dependency-free validator and its fixture suites run directly on Node 24.
-Retaining the existing lifecycle/link/review/wireframe checks avoids a second,
-partial reimplementation in Python. Pytest evidence recognition adapts the gate
-to Talaria's source tests. No Node package manager or runtime dependency is
-introduced, and Python packaging stays in `pyproject.toml`/`uv.lock`.
+## Specification tooling stays outside the Python runtime
 
-The cost is a Node prerequisite for contributors and CI running record checks.
-The validator recognizes test-shaped evidence structurally; actual Python and
-Node tests are separate required gates, not inferred from references.
+The dependency-free local checker and synthetic fixture suites run on Node 24.
+OpenSpec 1.15.0 supplies native strict validation rather than a parallel parser.
+The local checker adds repository containment, pytest evidence recognition,
+single-task-writer structure and canonical visual inventory. These are structural
+checks; real Python and Node test execution remain separate gates.
+
+OpenSpec is a separately installed maintenance CLI. CI obtains the exact package
+version in a job-local npm prefix with install scripts disabled; transitive
+dependencies resolve at installation, not from a Talaria Node lockfile. Python
+packaging stays in `pyproject.toml`/`uv.lock`; no Node application manifest or
+runtime dependency is introduced. This costs contributors a tooling prerequisite
+and CI a public-registry install, but never adds OpenSpec to the installed CLI.
+Native host workflows and companion packages remain externally owned and require
+separate user/profile installation authority; no local adapters are shipped.
 
 ## Offline acceptance evidence
 

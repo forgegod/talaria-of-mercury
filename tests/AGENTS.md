@@ -19,8 +19,9 @@ Pytest suite for the Talaria CLI and library.
   `test_doctor_aux_models.py` is a live-model benchmark suite
   whose live calls are gated behind `_TESTING_TALARIA_RUN_MODEL_BENCH=1`;
   offline configuration checks use `fixtures/model-profile.yaml`.
-- `records/` owns dependency-free Node validator fixture suites under its
-  own child contract. These are not pytest tests.
+- `records/` owns dependency-free Node validator fixture suites for the
+  OpenSpec structural checker under its own child contract. These are not
+  pytest tests.
 - Shared fixtures live in `conftest.py`; shared test helpers live in
   `_helpers.py` (importable, not auto-discovered by pytest). Vision
   fixture images live in `assets/benchmark/vision/` (see
@@ -84,13 +85,14 @@ Pytest suite for the Talaria CLI and library.
 ## Verification
 
 - `uv run --extra dev pytest` from the repo root must exit 0 before changes ship.
-- `node --test tests/records/*.test.mjs` proves record validation; run
-  `node scripts/check-product-records.mjs` against the actual documentation too.
+- `node --test tests/records/*.test.mjs` proves the OpenSpec record
+  validator; run `node scripts/check-openspec.mjs` against the actual
+  documentation too.
 - Live-model/provider integration remains opt-in, not covered by the offline gate.
 
 ## Child DOX Index
 
-- `records/AGENTS.md` — synthetic CAP/CHG validator suites and fixture helpers.
+- `records/AGENTS.md` — synthetic OpenSpec validator suites and fixture helpers.
 
 ### Test inventory (owned by this contract)
 

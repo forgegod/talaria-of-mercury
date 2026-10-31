@@ -1,201 +1,356 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { appendFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { validateRecords } from "../../scripts/check-product-records.mjs";
-import { addFixtureFile, createFixtureTree, patchFixture } from "./fixtures.mjs";
+import { validateOpenSpec } from "../../scripts/check-openspec.mjs";
+import {
+  FIXTURE_SPEC,
+  addChangePackage,
+  addFixtureFile,
+  addVisuals,
+  createFixtureTree,
+  patchFixture,
+} from "./fixtures.mjs";
 
-const cap = "docs/product/capabilities/CAP-001-fixture-capability.md";
-const wireframes = "docs/product/wireframes";
-const review = "docs/changes/reviews/CHG-001";
-const change = "docs/changes/active/CHG-001-fixture-change.md";
-const screen = {
-  id: "CAP-001",
-  title: "Fixture screen",
-  html: "html/CAP-001-fixture-capability.html",
-  png: "exports/CAP-001-fixture-capability.png",
-  viewport: { width: 1280, height: 800 },
-};
+const visuals = "docs/product/wireframes";
+const cap = "fixture-workflow";
+const screen = "fixture-overview";
+const html = `html/${cap}-${screen}.html`;
+const png = `exports/${cap}-${screen}.png`;
 
 function append(root, file, text) {
   appendFileSync(path.join(root, file), text);
 }
 
-function manifest(root, screens = [screen]) {
-  addFixtureFile(root, `${wireframes}/manifest.json`, JSON.stringify({ screens }));
+function manifest(root, screens) {
+  addFixtureFile(root, `${visuals}/manifest.json`, JSON.stringify({ screens }, null, 2));
 }
 
+function screenEntry(overrides = {}) {
+  return {
+    capability: cap,
+    screen,
+    title: "Workflow overview",
+    html,
+    png,
+    viewport: { width: 1280, height: 800 },
+    ...overrides,
+  };
+}
+
+/** A valid human-surface capability plus canonical visuals. */
 function visualFixture(root) {
-  patchFixture(root, cap, "**Primary surface:** human", "**Primary surface:** none");
-  addFixtureFile(root, `${wireframes}/generate.mjs`, "// Synthetic generator fixture; never executed.\n");
-  addFixtureFile(root, `${wireframes}/${screen.html}`, "<html>Synthetic screen fixture</html>");
-  // The validator checks inventory, not PNG bytes or rendering fidelity.
-  addFixtureFile(root, `${wireframes}/${screen.png}`, "synthetic PNG inventory placeholder");
-  addFixtureFile(root, `${wireframes}/index.html`, `<a href="${screen.html}">Fixture</a>`);
-  manifest(root);
-  append(root, cap, `\n## Links\n\n[HTML](../wireframes/${screen.html})\n[PNG](../wireframes/${screen.png})\n`);
+  addVisuals(root, { capability: cap, screen });
 }
 
-function reviewFixture(root) {
-  addFixtureFile(root, change, `# CHG-001 — Fixture change
-
-**Status:** planned
-**External request:** Direct operator request: fixture
-**Impacts:** CAP-001
-**Baseline:** abc1234
-
-| # | Phase | Status | Verification gate |
-| --- | --- | --- | --- |
-| 1 | Implement | pending | pytest exits 0 |
-
-## Phase 1 — Implement
-
-Synthetic fixture.
-
-[Review package](../reviews/CHG-001/README.md)
-`);
-  addFixtureFile(root, `${review}/README.md`, "# Review proposal\n\n**Status:** review-only\n\n[HTML](screen.html) · [Design](design.md)\n");
-  addFixtureFile(root, `${review}/design.md`, "# Design proposal\n\nReview-only, no implementation claim.\n");
-  addFixtureFile(root, `${review}/screen.html`, "<html>Review-only synthetic proposal</html>");
+function assertError(errors, expected) {
+  assert.ok(
+    errors.some((error) => error.includes(expected)),
+    `expected an error containing ${JSON.stringify(expected)}; got:\n${errors.join("\n")}`,
+  );
 }
 
-for (const status of ["planned", "done", "cancelled"]) {
-  test(`review package remains valid with a ${status} owner`, async () => {
-    const { root, cleanup } = createFixtureTree();
-    try {
-      reviewFixture(root);
-      if (status !== "planned") {
-        patchFixture(root, change, `**Status:** ${status}`, "**Status:** planned");
-        renameSync(path.join(root, change), path.join(root, change.replace("/active/", "/archive/")));
-      }
-      const result = await validateRecords(root);
-      assert.deepEqual(result.errors, []);
-      assert.equal(result.changes, 1, "review Markdown must not count as CHG records");
-      assert.equal(result.manifest, false, "reviews must not activate product wireframes");
-    } finally {
-      cleanup();
-    }
-  });
-}
-
-test("canonical human-surface wireframes pass", async () => {
+test("canonical visuals for a human surface pass", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
     visualFixture(root);
-    const result = await validateRecords(root);
+    const result = await validateOpenSpec(root);
     assert.deepEqual(result.errors, []);
-    assert.equal(result.manifest, true);
+    assert.equal(result.visuals, true);
   } finally {
     cleanup();
   }
 });
 
-const reviewFailures = [
-  ["orphan package", root => rmSync(path.join(root, change)), "has no owning CHG"],
-  ["missing package README", root => rmSync(path.join(root, review, "README.md")), "requires README.md"],
-  ["missing review-only marker", root => patchFixture(root, `${review}/README.md`, "", "**Status:** review-only"), "must declare Status: review-only"],
-  ["review-only marker only in a code fence", root => patchFixture(root, `${review}/README.md`, "```md\n**Status:** review-only\n```", "**Status:** review-only"), "must declare Status: review-only"],
-  ["unlinked package", root => patchFixture(root, change, "", "[Review package](../reviews/CHG-001/README.md)"), "must link its review package README.md"],
-  ["package link only in code fence", root => patchFixture(root, change, "```md\n[Review package](../reviews/CHG-001/README.md)\n```", "[Review package](../reviews/CHG-001/README.md)"), "must link its review package README.md"],
-  ["broken review Markdown link", root => append(root, `${review}/design.md`, "\n[Missing](missing.png)\n"), "has broken local link"],
-  ["escaping review Markdown link", root => append(root, `${review}/design.md`, "\n[Outside](../../../../../outside.md)\n"), "links outside the repository"],
-  ["loose review file", root => addFixtureFile(root, "docs/changes/reviews/screen.html", "fixture"), "must be a CHG-<number> review directory"],
-  ["malformed owner ID", root => renameSync(path.join(root, review), path.join(root, "docs/changes/reviews/CHG-one")), "must be a CHG-<number> review directory"],
-  ["CAP links proposal HTML", root => append(root, cap, "\n[Proposal](../../changes/reviews/CHG-001/screen.html)\n"), "must not link review artifacts"],
-  ["CAP links proposal README", root => append(root, cap, "\n[Proposal](../../changes/reviews/CHG-001/README.md)\n"), "must not link review artifacts"],
-];
-
-for (const place of ["active", "archive"]) {
-  for (const artifact of ["CHG-001-review.html", "CHG-001-review.png", "design.md", "CHG-001/design.md"]) {
-    reviewFailures.push([
-      `${place} contains ${artifact}`,
-      root => addFixtureFile(root, `docs/changes/${place}/${artifact}`, "Synthetic review artifact"),
-      "contains non-record entry",
-    ]);
+test("a none surface without a visuals directory passes", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    const result = await validateOpenSpec(root);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.visuals, false);
+  } finally {
+    cleanup();
   }
-}
+});
 
-for (const [name, mutate, expected] of reviewFailures) {
-  test(`rejects ${name}`, async () => {
-    const { root, cleanup } = createFixtureTree();
-    try {
-      reviewFixture(root);
-      mutate(root);
-      const { errors } = await validateRecords(root);
-      assert.ok(errors.some(error => error.includes(expected)), errors.join("\n"));
-    } finally {
-      cleanup();
-    }
-  });
-}
-
-const visualFailures = [
-  ["missing surface declaration", root => patchFixture(root, cap, "", "**Primary surface:** human"), "invalid primary surface"],
-  ["surface declaration only in a code fence", root => patchFixture(root, cap, "```md\n**Primary surface:** human\n```", "**Primary surface:** human"), "invalid primary surface"],
-  ["invalid surface declaration", root => patchFixture(root, cap, "**Primary surface:** yes", "**Primary surface:** human"), "invalid primary surface"],
-  ["absent manifest", root => rmSync(path.join(root, wireframes, "manifest.json")), "manifest.json is required"],
-  ["human CAP with no wireframe directory", root => rmSync(path.join(root, wireframes), { recursive: true }), "manifest.json is required"],
-  ["wireframes without manifest even with no human CAP", root => {
-    patchFixture(root, cap, "**Primary surface:** none", "**Primary surface:** human");
-    rmSync(path.join(root, wireframes, "manifest.json"));
-  }, "manifest.json is required"],
-  ["empty manifest omits human CAP", root => manifest(root, []), "must list primary-surface capability CAP-001"],
-  ["missing generator", root => rmSync(path.join(root, wireframes, "generate.mjs")), "generate.mjs is required"],
-  ["missing index", root => rmSync(path.join(root, wireframes, "index.html")), "index.html is required"],
-  ["missing HTML", root => rmSync(path.join(root, wireframes, screen.html)), "lists missing artifact"],
-  ["missing PNG", root => rmSync(path.join(root, wireframes, screen.png)), "lists missing artifact"],
-  ["unlisted HTML", root => addFixtureFile(root, `${wireframes}/html/CAP-001-extra.html`, "fixture"), "artifact is missing from the manifest"],
-  ["unlisted PNG", root => addFixtureFile(root, `${wireframes}/exports/CAP-001-extra.png`, "fixture"), "artifact is missing from the manifest"],
-  ["proposal in canonical HTML directory", root => addFixtureFile(root, `${wireframes}/html/CHG-001-review.html`, "fixture"), "invalid wireframe artifact"],
-  ["links outside Links section", root => patchFixture(root, cap, "## Related visuals", "## Links"), "must link its wireframe HTML and PNG under ## Links"],
-  ["misnamed Links heading", root => patchFixture(root, cap, "## Links elsewhere", "## Links"), "must link its wireframe HTML and PNG under ## Links"],
-  ["links only in a code fence", root => {
-    patchFixture(root, cap, "## Links\n\n```md", "## Links");
-    append(root, cap, "```\n");
-  }, "must link its wireframe HTML and PNG under ## Links"],
-  ["missing index hyperlink", root => addFixtureFile(root, `${wireframes}/index.html`, `<!-- ${screen.html} -->`), "index.html must link"],
-  ["duplicate screen ID", root => manifest(root, [screen, screen]), "duplicates capability CAP-001"],
-  ["unknown screen ID", root => manifest(root, [{ ...screen, id: "CAP-999" }]), "unknown capability CAP-999"],
-  ["non-human CAP in manifest", root => patchFixture(root, cap, "**Primary surface:** none", "**Primary surface:** human"), "must declare Primary surface: human"],
-  ["mismatching artifact slugs", root => {
-    addFixtureFile(root, `${wireframes}/exports/CAP-001-other.png`, "fixture");
-    manifest(root, [{ ...screen, png: "exports/CAP-001-other.png" }]);
-  }, "HTML and PNG names must match"],
-  ["proposal paths in manifest", root => manifest(root, [{ ...screen, html: "../../changes/reviews/CHG-001/screen.html" }]), "manifest html path must be"],
-  ["invalid viewport", root => manifest(root, [{ ...screen, viewport: { width: 0, height: 800 } }]), "positive integer viewport"],
-  ["missing title", root => manifest(root, [{ ...screen, title: "" }]), "non-empty title"],
-  ["null screen entry", root => manifest(root, [null]), "must carry a CAP-<number> id"],
-  ["null manifest", root => addFixtureFile(root, `${wireframes}/manifest.json`, "null"), "must contain a `screens` array"],
-  ["malformed JSON", root => addFixtureFile(root, `${wireframes}/manifest.json`, "{"), "not valid JSON"],
+const requiredVisuals = [
+  ["manifest", root => rmSync(path.join(root, visuals, "manifest.json")), "manifest.json is required for the visual workflow"],
+  ["generator", root => rmSync(path.join(root, visuals, "generate.mjs")), "generate.mjs is required for the visual workflow"],
+  ["index", root => rmSync(path.join(root, visuals, "index.html")), "index.html is required for the visual workflow"],
 ];
 
-for (const [name, mutate, expected] of visualFailures) {
-  test(`rejects ${name}`, async () => {
+for (const [label, mutate, expected] of requiredVisuals) {
+  test(`a human surface missing its ${label} fails`, async () => {
     const { root, cleanup } = createFixtureTree();
     try {
       visualFixture(root);
       mutate(root);
-      const { errors } = await validateRecords(root);
-      assert.ok(errors.some(error => error.includes(expected)), errors.join("\n"));
+      assertError(await validateOpenSpec(root).then((result) => result.errors), expected);
     } finally {
       cleanup();
     }
   });
 }
 
-test("review-only links cannot replace canonical visuals with an empty manifest", async () => {
+test("a visuals directory without a manifest fails even when no surface is human", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addFixtureFile(root, `${visuals}/index.html`, "<html>Synthetic</html>\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "manifest.json is required for the visual workflow",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("an empty manifest is rejected as empty visual scaffolding", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
     visualFixture(root);
-    reviewFixture(root);
     manifest(root, []);
-    rmSync(path.join(root, wireframes, "html"), { recursive: true });
-    rmSync(path.join(root, wireframes, "exports"), { recursive: true });
-    const source = readFileSync(path.join(root, cap), "utf8");
-    patchFixture(root, cap, `${source.split("## Links")[0]}## Links\n\n[Review](../../changes/reviews/CHG-001/screen.html)\n`);
-    const { errors } = await validateRecords(root);
-    assert.ok(errors.some(error => error.includes("must not link review artifacts")));
-    assert.ok(errors.some(error => error.includes("must list primary-surface capability CAP-001")));
+    const errors = await validateOpenSpec(root).then((result) => result.errors);
+    assertError(errors, "wireframe manifest must contain a non-empty screens array");
+    assertError(errors, "wireframe manifest must list primary-surface capability fixture-workflow");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a human surface missing from the manifest fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    manifest(root, [screenEntry({ capability: "unrelated" })]);
+    const errors = await validateOpenSpec(root).then((result) => result.errors);
+    assertError(errors, "wireframe manifest must list primary-surface capability fixture-workflow");
+    assertError(errors, "wireframe manifest lists unknown capability unrelated");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a visual artifact listed in the manifest but absent fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    rmSync(path.join(root, visuals, html));
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      `wireframe manifest lists missing artifact: ${html}`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a visual artifact absent from the manifest fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    addFixtureFile(root, `${visuals}/html/${cap}-extra.html`, "<html>Unlisted</html>\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      `visual artifact is missing from the manifest: html/${cap}-extra.html`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a proposal in the canonical visual directory fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    addFixtureFile(root, `${visuals}/html/add-fixture-behaviour-proposal.html`, "<html>Proposal</html>\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "invalid visual artifact",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a human spec that does not link its visuals fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addVisuals(root, { capability: cap, screen, specLink: false });
+    patchFixture(root, FIXTURE_SPEC, "**Primary surface:** human", "**Primary surface:** none");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must link its visual HTML and PNG under ## Visuals",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a none-surface spec declaring visuals fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    append(
+      root,
+      FIXTURE_SPEC,
+      `\n## Visuals\n\n- [HTML](../../../${visuals}/${html})\n`,
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must not declare ## Visuals while Primary surface: none",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a manifest entry for a none-surface capability fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addVisuals(root, { capability: cap, screen });
+    patchFixture(root, FIXTURE_SPEC, "**Primary surface:** none", "**Primary surface:** human");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must declare Primary surface: human",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a duplicate capability/screen key fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    manifest(root, [screenEntry(), screenEntry()]);
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "wireframe manifest duplicates visual fixture-workflow/fixture-overview",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("an invalid screen key fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    manifest(root, [screenEntry({ screen: "Workflow_Overview", html: "html/Workflow_Overview.html", png: "exports/Workflow_Overview.png" })]);
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must use a lowercase visual screen key",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+const manifestFailures = [
+  ["a proposal path", { html: "../../openspec/changes/add-fixture-behaviour/proposal.md" }, "manifest html path must be html/fixture-workflow-fixture-overview.html"],
+  ["a mismatched png path", { png: "exports/other.png" }, "manifest png path must be exports/fixture-workflow-fixture-overview.png"],
+  ["an invalid viewport", { viewport: { width: 0, height: 800 } }, "positive integer viewport width and height"],
+  ["a missing title", { title: "" }, "must have a non-empty title"],
+  ["a non-string capability", { capability: null }, "must carry a capability key"],
+];
+
+for (const [label, overrides, expected] of manifestFailures) {
+  test(`a manifest entry with ${label} fails`, async () => {
+    const { root, cleanup } = createFixtureTree();
+    try {
+      visualFixture(root);
+      manifest(root, [screenEntry(overrides)]);
+      assertError(await validateOpenSpec(root).then((result) => result.errors), expected);
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+test("a malformed manifest fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    addFixtureFile(root, `${visuals}/manifest.json`, "{");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "manifest.json is not valid JSON",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("an index that does not link the canonical HTML fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    addFixtureFile(root, `${visuals}/index.html`, "<!-- html/fixture-workflow-fixture-overview.html -->\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      `docs/product/wireframes/index.html must link ${html}`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a spec linking a change proposal fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    append(
+      root,
+      FIXTURE_SPEC,
+      "\n[Proposal](../../changes/add-fixture-behaviour/proposal.md)\n",
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must not link change proposals",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a spec link escaping the repository fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    append(root, FIXTURE_SPEC, "\n[Outside](../../../../../outside.md)\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "links outside the repository",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a symlink escaping the OpenSpec tree fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    const outside = path.join(root, "outside.md");
+    writeFileSync(outside, "# Outside\n");
+    symlinkSync(outside, path.join(root, "openspec", "specs", "fixture-workflow", "linked.md"));
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "is a symlink; OpenSpec records and visual artifacts must be real files",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a symlink in the visual artifact inventory fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    visualFixture(root);
+    rmSync(path.join(root, visuals, png));
+    symlinkSync(path.join(root, "outside.png"), path.join(root, visuals, png));
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "is a symlink; OpenSpec records and visual artifacts must be real files",
+    );
   } finally {
     cleanup();
   }

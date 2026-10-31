@@ -74,8 +74,9 @@ The Talaria Python package — `talaria` CLI entry point and library code.
 ## Verification
 
 - `pytest` from the repo root must pass before any change is considered done.
-- Material behaviour changes also update their CAP and CHG under `docs/` and
-  pass `node scripts/check-product-records.mjs`; see the root record contract.
+- Material behaviour changes also update their native delta specs and current
+  requirements under `openspec/`, and pass `node scripts/check-openspec.mjs`
+  plus pinned upstream strict validation; see the root workflow contract.
 - New feature modules must add a sibling `tests/test_<feature>.py` using the
   `fake_hermes_root` fixture from `tests/conftest.py` plus
   `tests/_helpers.make_sessions_db`.

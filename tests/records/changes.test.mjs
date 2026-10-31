@@ -1,67 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateRecords } from "../../scripts/check-product-records.mjs";
-import { addFixtureFile, createFixtureTree } from "./fixtures.mjs";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { validateOpenSpec } from "../../scripts/check-openspec.mjs";
+import {
+  addChangePackage,
+  addFixtureFile,
+  createFixtureTree,
+  patchFixture,
+} from "./fixtures.mjs";
 
-const PHASES = `
-| #   | Phase                | Status      | Verification gate      |
-| --- | -------------------- | ----------- | ---------------------- |
-| 1   | Ship the slice       | in-progress | \`pytest tests\` exits 0 |
-`;
+const PACKAGE = "openspec/changes/add-fixture-behaviour";
 
-/**
- * @param {string} root
- * @param {object} options
- * @param {string} [options.place]
- * @param {string} [options.status]
- * @param {string} [options.impacts]
- * @param {string} [options.phases]
- * @param {boolean} [options.dropPhaseSection]
- * @param {boolean} [options.dropTable]
- * @param {boolean} [options.dropRequest]
- */
-function addChange(root, {
-  place = "active",
-  status = "in-progress",
-  impacts = "CAP-001",
-  phases = PHASES,
-  dropPhaseSection = false,
-  dropTable = false,
-  dropRequest = false,
-} = {}) {
-  const lines = [
-    "# CHG-001 — Fixture change",
-    "",
-    `**Status:** ${status}`,
-  ];
-  if (!dropRequest) lines.push("**External request:** Direct operator request: fixture");
-  lines.push(`**Impacts:** ${impacts}`, "**Baseline:** `abc1234`", "");
-  if (!dropTable) lines.push(phases);
-  if (!dropPhaseSection) {
-    lines.push(
-      "",
-      "## Phase 1 — Ship the slice",
-      "",
-      "**Goal:** fixture",
-      "",
-      "1. do it",
-      "",
-      "**Verification gate:** `pytest tests` exits 0",
-      "",
-      "## Out of scope",
-      "",
-      "- none",
-      "",
-    );
-  }
-  addFixtureFile(root, `docs/changes/${place}/CHG-001-fixture-change.md`, lines.join("\n"));
+function assertError(errors, expected) {
+  assert.ok(
+    errors.some((error) => error.includes(expected)),
+    `expected an error containing ${JSON.stringify(expected)}; got:\n${errors.join("\n")}`,
+  );
 }
 
-test("a valid in-progress CHG in active/ passes", async () => {
+test("a valid active change package passes", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root);
-    const result = await validateRecords(root);
+    addChangePackage(root);
+    const result = await validateOpenSpec(root);
     assert.deepEqual(result.errors, []);
     assert.equal(result.changes, 1);
   } finally {
@@ -69,132 +31,267 @@ test("a valid in-progress CHG in active/ passes", async () => {
   }
 });
 
-test("an in-progress CHG in archive/ fails", async () => {
+test("a valid archived change package passes", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { place: "archive" });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("status 'in-progress' is invalid for archive/"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root, { name: "2024-05-01-add-fixture-behaviour", place: "changes/archive" });
+    const result = await validateOpenSpec(root);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.changes, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("an archived package without a date prefix fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root, { place: "changes/archive" });
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must use <YYYY-MM-DD>-<slug>",
     );
   } finally {
     cleanup();
   }
 });
 
-test("a done CHG in active/ fails", async () => {
+test("an active package with an invalid slug fails", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { status: "done", phases: PHASES.replace("in-progress", "done") });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("status 'done' is invalid for active/"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root, { name: "Add_Fixture" });
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must use a lowercase change slug",
     );
   } finally {
     cleanup();
   }
 });
 
-test("a planned CHG with an in-progress phase fails", async () => {
+const missingParts = [
+  ["proposal.md", { proposal: false }, "is missing proposal.md"],
+  ["tasks.md", { tasks: false }, "is missing tasks.md"],
+];
+
+for (const [label, options, expected] of missingParts) {
+  test(`a change package missing ${label} fails`, async () => {
+    const { root, cleanup } = createFixtureTree();
+    try {
+      addChangePackage(root, options);
+      assertError(await validateOpenSpec(root).then((result) => result.errors), expected);
+    } finally {
+      cleanup();
+    }
+  });
+}
+
+test("a change package may omit optional design.md", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { status: "planned" });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("cannot have an in-progress phase while planned"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root, { design: false });
+    assert.deepEqual((await validateOpenSpec(root)).errors, []);
+  } finally {
+    cleanup();
+  }
+});
+
+// Native strict validation owns zero-delta and skip_specs admission. The local
+// checker validates deltas that are present and parses no YAML metadata.
+test("a change package with no spec delta defers zero-delta admission to native validation", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root, { delta: false });
+    addFixtureFile(root, `${PACKAGE}/.openspec.yaml`, "skip_specs: true\n");
+    assert.deepEqual((await validateOpenSpec(root)).errors, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a proposal without ## Why fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(root, `${PACKAGE}/proposal.md`, "", "## Why\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "proposal.md must include a ## Why section",
     );
   } finally {
     cleanup();
   }
 });
 
-test("an in-progress CHG with two in-progress phases fails", async () => {
+test("a proposal without ## What Changes fails", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    const twoPhases = `
-| #   | Phase                | Status      | Verification gate      |
-| --- | -------------------- | ----------- | ---------------------- |
-| 1   | Ship the slice       | in-progress | \`pytest tests\` exits 0 |
-| 2   | Integrate records    | in-progress | \`node --test\` exits 0  |
-`;
-    addChange(root, { phases: twoPhases });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("has more than one in-progress phase"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root);
+    patchFixture(root, `${PACKAGE}/proposal.md`, "", "## What Changes\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "proposal.md must include a ## What Changes section",
     );
   } finally {
     cleanup();
   }
 });
 
-test("Impacts referencing an unknown CAP fails", async () => {
+test("an empty design fails", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { impacts: "CAP-999" });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("references unknown capability CAP-999"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root);
+    patchFixture(root, `${PACKAGE}/design.md`, "# Design\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "design.md must state at least one design decision",
     );
   } finally {
     cleanup();
   }
 });
 
-test("a CHG missing the phase table header fails", async () => {
+test("tasks without a checkbox task fail", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { dropTable: true });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("must include the canonical phase table header"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root);
+    patchFixture(root, `${PACKAGE}/tasks.md`, "# Tasks\n\n## 1. Implementation\n\nDo the work.\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "tasks.md must include at least one checkbox task",
     );
   } finally {
     cleanup();
   }
 });
 
-test("a CHG missing a numbered Phase section fails", async () => {
+test("a non-checkbox list item in tasks.md fails", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { dropPhaseSection: true });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) =>
-        error.includes("must include at least one numbered Phase section"),
-      ),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root);
+    patchFixture(
+      root,
+      `${PACKAGE}/tasks.md`,
+      "# Tasks\n\n## 1. Implementation\n\n- [ ] 1.1 Add behaviour\n- plain note\n",
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "tasks.md must use checkbox list items only",
     );
   } finally {
     cleanup();
   }
 });
 
-test("a CHG missing the External request metadata fails", async () => {
+test("task progress outside tasks.md fails", async () => {
   const { root, cleanup } = createFixtureTree();
   try {
-    addChange(root, { dropRequest: true });
-    const errors = await validateRecords(root).then((result) => result.errors);
-    assert.ok(
-      errors.some((error) => error.includes("must name an External request")),
-      `errors were: ${errors.join(" | ")}`,
+    addChangePackage(root);
+    patchFixture(
+      root,
+      `${PACKAGE}/proposal.md`,
+      "- [x] hidden progress\n",
+      "- Extend the fixture-workflow capability.\n",
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must be the only task-progress writer",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+const delta = `${PACKAGE}/specs/fixture-workflow/spec.md`;
+
+test("a delta with no ADDED, MODIFIED, REMOVED, or RENAMED section fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(root, delta, "## Notes\n\nSynthetic.\n", "## ADDED Requirements\n");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must declare an ## ADDED Requirements, ## MODIFIED Requirements, ## REMOVED Requirements, or ## RENAMED Requirements section",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("an unsupported delta section fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(root, delta, "## Notes\n\nSynthetic.\n\n## ADDED Requirements", "## ADDED Requirements");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "has an unsupported delta section '## Notes'",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("an ADDED requirement without a scenario fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(
+      root,
+      delta,
+      "The fixture SHALL make the fixture behaviour reviewable.\n",
+      "The fixture SHALL make the fixture behaviour reviewable.\n\n#### Scenario: Reviewing the fixture behaviour\n\n- **WHEN** the change is reviewed\n- **THEN** the delta states the behaviour\n",
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "requirement 'Fixture behaviour is reviewable' must include at least one #### Scenario",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a delta with an invalid requirement heading fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(root, delta, "### Requirement Fixture behaviour is reviewable", "### Requirement: Fixture behaviour is reviewable");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "has an invalid heading '### Requirement Fixture behaviour is reviewable'",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a delta for an invalid capability key fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    const source = readFileSync(path.join(root, delta), "utf8");
+    addFixtureFile(
+      root,
+      `${PACKAGE}/specs/Bad_Capability/spec.md`,
+      source,
+    );
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "must use a lowercase capability key",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a broken link inside a change package fails", async () => {
+  const { root, cleanup } = createFixtureTree();
+  try {
+    addChangePackage(root);
+    patchFixture(root, `${PACKAGE}/design.md`, "\n[Missing](missing.md)\n", "## Decisions");
+    assertError(
+      await validateOpenSpec(root).then((result) => result.errors),
+      "has broken local link: missing.md",
     );
   } finally {
     cleanup();

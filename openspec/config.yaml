@@ -1,0 +1,35 @@
+schema: spec-driven
+context: |
+  Talaria is a Python >=3.10 maintenance CLI for Hermes Agent operators.
+  Hermes stays external; Node 24 and OpenSpec 1.15.0 are development-only.
+  Read AGENTS.md, openspec/AGENTS.md and docs/openspec-workflow.md.
+  Current requirements live in openspec/specs; native tasks.md is the sole task list.
+  Only the orchestrator writes task progress and Git; implementers report evidence.
+  Preserve command-specific preview/apply defaults, profile scope and network boundaries.
+  Default verification uses synthetic data and stubs, never operator profiles or live models.
+  Before new scaffolding use the installed openspec-delivery naming/workspace procedure.
+  Generate one full identity, reuse it on resume; existing migrated names stay unchanged.
+  Guidance is not a CLI hook, approval, or authority for GitHub or profile writes.
+rules:
+  proposal:
+    - State observable outcome, scope, non-goals, dependencies and operator authority.
+    - Local planning does not authorize implementation, commits or GitHub writes.
+    - Cite the full change name outside its package, not a moving active/archive path.
+  specs:
+    - Use observable SHALL requirements and native WHEN/THEN scenario headings.
+    - Delta specs have no frontmatter; current specs declare Primary surface human or none.
+    - Link repository-relative implementation and executable test paths under Verification.
+    - Preserve known limitations and evidence gaps rather than inferring safety from command names.
+  tasks:
+    - Only the orchestrator updates native checkboxes after evidence.
+    - Run Python tests/build, local structure checks and pinned upstream strict validation.
+    - Track independent review before archive; terminal finish/archive references are plain bullets under Workflow follow-up.
+operations:
+  apply:
+    guidance:
+      - Mediate native apply checkbox writes; implementers cannot edit tasks.md.
+      - Execute only approved scope with explicit authority and one writer per change.
+  archive:
+    guidance:
+      - Require authorized integration, exact integrated-revision gates and factual Git-tracked evidence.
+      - Do not reapply already integrated deltas, predict a merge receipt or close unrelated requests.

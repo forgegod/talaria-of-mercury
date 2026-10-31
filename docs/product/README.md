@@ -1,85 +1,62 @@
-# Product capability records
+# Product specifications and visuals
 
-`capabilities/CAP-*.md` is the repository's current, human-readable product-behaviour index. It complements executable code and tests; it does not replace them.
+The [capability index](index.md) links Talaria's current requirements under
+`openspec/specs/<capability>/spec.md`. Code and executable tests decide conflicts.
+This directory is navigation and optional canonical visuals, not a second
+requirement or task system. Read [OpenSpec DOX](../../openspec/AGENTS.md) and
+[the workflow](../openspec-workflow.md) for authoring and lifecycle rules.
 
-## Authority
+## Current requirements
 
-| Question                                                | Authority                                                               |
-| ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Why should work happen?                                 | External ticket or direct operator request                              |
-| What does this repository revision do?                  | CAP contract, implementation, and executable tests at the same revision |
-| How far is a requested change implemented?              | `../changes/active/CHG-*.md`                                            |
-| Why was an irreversible or cross-cutting option chosen? | `../design-decisions.md`                                                |
+Current specs have `## Purpose`, `## Requirements`, and `## Verification`, in
+that order. Each `### Requirement:` states an observable SHALL/MUST outcome
+with at least one `#### Scenario:` using WHEN/THEN. Verification names actual
+repository-relative implementation and test files, with proving test functions
+in adjacent prose. Do not use pytest node IDs as file paths. Known limitations
+and evidence gaps remain explicit rather than being promoted to proven guarantees.
 
-## When a CAP changes
+Material changes evolve native delta specs, implementation, behavior tests, and
+affected visuals together. Sync accepted requirements before terminal closure;
+behavior-preserving maintenance does not churn requirements. Capability-local
+rules belong in their spec; cross-cutting decisions belong in
+[design decisions](../design-decisions.md).
 
-Update a CAP in the same change when behaviour visible to a user, caller, operator, or tool contract changes. Do not update it for a refactor that preserves those outcomes.
+Every current spec declares `**Primary surface:** human` or `none`. Talaria's
+non-interactive text/JSON CLI has no primary screen, pane, or dialog and declares
+`none`. This does not exempt a future visual interface.
 
-A CAP claim must be specific enough for a test to falsify. Link existing architecture contracts instead of copying their text.
+## Canonical wireframes
 
-## CAP shape
+A human-facing spec or the presence of `wireframes/` activates this contract;
+deleting the manifest does not disable validation. No empty scaffolding ships.
 
-```markdown
-# CAP-001 — Capability name
+- `wireframes/generate.mjs` owns canonical screen definitions and generates
+  `manifest.json`, `index.html`, and `html/<capability>-<screen>.html`. The
+  project's renderer exports matching `exports/<capability>-<screen>.png`.
+- The manifest has a non-empty `screens` array. Each entry has `capability`
+  (an existing human-facing spec key), `screen` (a lowercase hyphenated key),
+  non-empty `title`, `html`, `png`, and positive integer viewport width/height.
+  Capability/screen pairs are unique; a capability can have multiple screens.
+- Every human-facing capability has at least one screen. The manifest and flat
+  artifact directories agree in both directions; missing, extra or misnamed
+  artifacts fail. `index.html` links every screen using an HTML anchor.
+- Current specs link each HTML/PNG pair under `## Visuals` using relative links
+  into `docs/product/wireframes/`. A `none` spec has no visual section or screen.
+- Proposal assets stay review-only inside their native change package. Current
+  specs never link change packages; proposals never enter the canonical manifest.
 
-**Status:** implemented
-**Primary surface:** none
-
-## Behaviour
-
-- <present-tense, falsifiable outcome>
-
-## Implementation
-
-- `<repository source path>` — <where the behaviour is implemented>
-
-## Rules and boundaries
-
-- <durable local rule or link to an architecture contract>
-
-## Verification
-
-- `<test path>` — <what the test proves>
-
-## Related contracts
-
-- [Architecture](../../architecture.md)
-```
-
-Allowed status values: `implemented`, `partial`, `retired`. `partial` states the implemented boundary precisely; it is not a substitute for a future-work list.
-
-`Primary surface` is required on every CAP, including partial or retired records. Use the literal `human` for a primary screen, pane, dialog, or multi-step visual interaction; use `none` otherwise, including headless capabilities. The validator rejects missing or other values rather than inferring a surface from prose. A human-facing CAP requires its own canonical wireframe; a `none` CAP has no manifest screen.
-
-## Capability-local decisions
-
-Record a decision in the CAP only when it changes how a reader must use or understand the current behaviour. Put irreversible runtime, persistence, privacy, or observability decisions in `../design-decisions.md` instead.
-
-## Wireframes
-
-Talaria is a non-interactive text/JSON CLI with no primary visual screen, pane, or dialog, and ships no `wireframes/` directory. Current CAPs therefore declare `none`. A CAP declaring `human`, or the presence of that directory, activates the workflow; deleting the manifest does not disable validation.
-
-- `wireframes/generate.mjs` is the only editable canonical screen-definition source. It generates `manifest.json`, `index.html`, and `html/CAP-<number>-<slug>.html`; the project's renderer exports matching `exports/CAP-<number>-<slug>.png` files.
-- The manifest is an object with a `screens` array. Each screen has `id` (an existing human-facing CAP ID), `title` (non-empty text), `html`, `png`, and `viewport` with positive integer `width` and `height`. IDs are unique; HTML and PNG filenames have the same CAP ID and slug.
-- Every human-facing CAP has exactly one screen. The manifest and both flat artifact directories agree in both directions; missing, extra, or misnamed artifacts fail validation. `index.html` links every screen through an HTML anchor.
-- Each human-facing CAP links its HTML and PNG using relative Markdown links under the exact `## Links` heading. For a CAP in `capabilities/`, paths begin `../wireframes/html/` and `../wireframes/exports/`.
-- Proposal packages stay in `docs/changes/reviews/CHG-<number>/` under the [change-review contract](../changes/README.md#review-packages). CAPs never link review-package files; proposals never enter the product manifest.
-
-For new and existing CAPs, a material interaction change updates the canonical generator, regenerated HTML, rendered PNG, CAP links, and behavior tests in the same implementation slice. Do not promote a proposal by merely moving or renaming its files. Create the wireframe child DOX on first activation and index it in `AGENTS.md`.
-
-`node scripts/check-product-records.mjs` enforces declarations, inventory, naming, and links. It does not render PNGs, establish source freshness, infer honest surface classification, or prove behavior. Run generation/rendering and inspect the affected visuals as explicit phase gates; wireframes never replace executable behavior evidence.
-
-## Agent integration
-
-Optional installed `application-records`, `capability-wireframes`, and
-`phased-plan-*` skills assist record maintenance. They are execution aids,
-not an alternate authority or a required Talaria runtime dependency. The active
-CHG remains the tracked plan; no local initializer or skill publisher is shipped.
+Update the generator, generated HTML, rendered PNG, manifest/spec links, and
+behavior tests in the same interaction change. Never promote proposal files by
+moving them. Create and index `wireframes/AGENTS.md` on activation. Load the
+installed `capability-wireframes` companion and stop if its prerequisites are
+missing; initialization does not install it.
 
 ## Verification
 
-Run `node scripts/check-product-records.mjs`, then the affected behaviour tests.
-
-Evidence paths use repository-relative filenames, not pytest node IDs. Name the
-proving test classes/functions in adjacent prose. The validator recognizes pytest
-`test_*.py` and `*_test.py` files and JavaScript test/spec files; structural
-recognition does not prove execution, collection, or adequate coverage.
+Run `node scripts/check-openspec.mjs`, OpenSpec 1.15.0
+`validate --all --strict` with telemetry disabled, and affected behavior tests.
+The checker recognizes JavaScript test files and pytest modules with test and
+assertion structure. Structural recognition is not test execution or adequate
+coverage. Visual inventory checks do not render PNGs, establish freshness, infer
+honest surface classification or grant approval: generate/render and inspect
+affected screens separately.

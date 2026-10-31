@@ -1,58 +1,60 @@
 /**
- * Fixture-tree builders for the record-validator behaviour tests.
+ * Fixture-tree builders for the OpenSpec structural-check behaviour tests.
  *
- * Each builder writes a minimal record tree under a fresh `node:os` tmpdir and
- * returns `{ root, cleanup }`. The default tree is valid; the mutation helpers
- * make one targeted break so a test can assert the matching error.
+ * Each builder writes a minimal, valid OpenSpec tree under a fresh `node:os`
+ * tmpdir and returns `{ root, cleanup }`. Mutation helpers and per-test patches
+ * introduce exactly one structural break so a test can assert the matching
+ * error. Trees are synthetic: no product code, no network, no upstream parser.
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-/** A minimal valid record tree plus the files a CAP references. */
+export const FIXTURE_SPEC = "openspec/specs/fixture-workflow/spec.md";
+/** Executable JavaScript evidence: a real test definition plus an assertion. */
+export const WORKFLOW_TEST = "tests/workflow.test.mjs";
+
+/** A minimal valid OpenSpec tree. */
 export function buildValidTree(root) {
-  fs.mkdirSync(path.join(root, "src"), { recursive: true });
-  fs.writeFileSync(
-    path.join(root, "src", "engine.mjs"),
-    "export const engine = 'fixture';\n",
-  );
-  fs.writeFileSync(
-    path.join(root, "src", "engine.test.mjs"),
-    "export const test = true;\n",
-  );
+  write(root, "openspec/config.yaml", "schema: spec-driven\n");
+  write(
+    root,
+    WORKFLOW_TEST,
+    `import { test } from "node:test";
+import assert from "node:assert/strict";
 
-  const product = path.join(root, "docs", "product");
-  const changes = path.join(root, "docs", "changes");
-  fs.mkdirSync(path.join(product, "capabilities"), { recursive: true });
-  fs.mkdirSync(path.join(path.join(changes, "active")), { recursive: true });
-  fs.mkdirSync(path.join(path.join(changes, "archive")), { recursive: true });
+test("fixture workflow capability", () => {
+  assert.equal("fixture", "fixture");
+});
+`,
+  );
+  write(
+    root,
+    FIXTURE_SPEC,
+    `# Fixture workflow
 
-  write(
-    root,
-    "docs/product/README.md",
-    `# Product capability records\n\n## CAP shape\n\nSee the template.\n`,
-  );
-  write(
-    root,
-    "docs/product/index.md",
-    `# Capability index\n\n- [CAP-001 — Fixture capability](capabilities/CAP-001-fixture-capability.md)\n`,
-  );
-  write(
-    root,
-    "docs/product/capabilities/CAP-001-fixture-capability.md",
-    `# CAP-001 — Fixture capability\n\n**Status:** implemented\n**Primary surface:** none\n\n## Behaviour\n\n- The fixture engine runs.\n\n## Implementation\n\n- \`src/engine.mjs\` — fixture engine.\n\n## Verification\n\n- \`src/engine.test.mjs\` — proves the fixture engine runs.\n\n## Related contracts\n\n- [Architecture](../../architecture.md)\n`,
-  );
-  write(
-    root,
-    "docs/changes/README.md",
-    `# Change records\n\nLifecycle rules live in this file.\n`,
-  );
-  write(
-    root,
-    "docs/architecture.md",
-    `# Architecture\n\nFixture tree contract.\n`,
-  );
+**Primary surface:** none
 
+## Purpose
+
+Fixture workflow capability.
+
+## Requirements
+
+### Requirement: Change proposals are reviewable
+
+The fixture SHALL record every material change as a reviewable proposal.
+
+#### Scenario: A proposal is opened
+
+- **WHEN** an operator opens a change package
+- **THEN** the package carries a proposal
+
+## Verification
+
+- \`tests/workflow.test.mjs\` proves the fixture capability.
+`,
+  );
   return { root };
 }
 
@@ -69,7 +71,7 @@ function write(root, relative, content) {
  * @returns {{root: string, cleanup: () => void}}
  */
 export function createFixtureTree() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "talaria-records-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "talaria-openspec-"));
   buildValidTree(root);
   return {
     root,
@@ -98,4 +100,152 @@ export function patchFixture(root, relative, replacement, match) {
 /** @param {string} root @param {string} relative @param {string} content */
 export function addFixtureFile(root, relative, content) {
   write(root, relative, content);
+}
+
+/** A second valid capability spec with a stable capability key. */
+export function addCapability(root, capability, { surface = "none" } = {}) {
+  write(
+    root,
+    `openspec/specs/${capability}/spec.md`,
+    `# ${capability}
+
+**Primary surface:** ${surface}
+
+## Purpose
+
+Fixture capability ${capability}.
+
+## Requirements
+
+### Requirement: ${capability} behaves
+
+The fixture SHALL support ${capability}.
+
+#### Scenario: ${capability} works
+
+- **WHEN** the capability is exercised
+- **THEN** it works
+
+## Verification
+
+- \`tests/workflow.test.mjs\` proves ${capability}.
+`,
+  );
+}
+
+/** A complete active change package whose delta modifies the workflow spec. */
+export function addChangePackage(root, {
+  name = "add-fixture-behaviour",
+  place = "changes",
+  proposal = true,
+  design = true,
+  tasks = true,
+  delta = true,
+  tasksBody = "## 1. Implementation\n\n- [ ] 1.1 Add the fixture behaviour\n- [ ] 1.2 Prove it\n",
+} = {}) {
+  const base = `openspec/${place}/${name}`;
+  if (proposal) {
+    write(
+      root,
+      `${base}/proposal.md`,
+      `# Add fixture behaviour
+
+## Why
+
+The fixture needs a reviewable change.
+
+## What Changes
+
+- Extend the fixture-workflow capability.
+`,
+    );
+  }
+  if (design) {
+    write(
+      root,
+      `${base}/design.md`,
+      `# Design
+
+## Decisions
+
+- Keep the fixture dependency-free.
+`,
+    );
+  }
+  if (tasks) write(root, `${base}/tasks.md`, `# Tasks\n\n${tasksBody}`);
+  if (delta) {
+    write(
+      root,
+      `${base}/specs/fixture-workflow/spec.md`,
+      `## ADDED Requirements
+
+### Requirement: Fixture behaviour is reviewable
+
+The fixture SHALL make the fixture behaviour reviewable.
+
+#### Scenario: Reviewing the fixture behaviour
+
+- **WHEN** the change is reviewed
+- **THEN** the delta states the behaviour
+`,
+    );
+  }
+  return base;
+}
+
+/** Canonical visuals for a human-surface capability, keyed by capability and screen. */
+export function addVisuals(root, {
+  capability = "fixture-workflow",
+  screen = "fixture-overview",
+  title = "Workflow overview",
+  html = true,
+  png = true,
+  generate = true,
+  index = true,
+  manifestBody,
+  specLink = true,
+} = {}) {
+  const base = "docs/product/wireframes";
+  if (generate) write(root, `${base}/generate.mjs`, "// Synthetic generator fixture; never executed.\n");
+  if (html) write(root, `${base}/html/${capability}-${screen}.html`, "<html>Synthetic screen fixture</html>\n");
+  if (png) write(root, `${base}/exports/${capability}-${screen}.png`, "synthetic PNG inventory placeholder\n");
+  if (index) {
+    write(
+      root,
+      `${base}/index.html`,
+      `<a href="html/${capability}-${screen}.html">${title}</a>\n`,
+    );
+  }
+  write(
+    root,
+    `${base}/manifest.json`,
+    manifestBody ??
+      JSON.stringify({
+        screens: [
+          {
+            capability,
+            screen,
+            title,
+            html: `html/${capability}-${screen}.html`,
+            png: `exports/${capability}-${screen}.png`,
+            viewport: { width: 1280, height: 800 },
+          },
+        ],
+      }, null, 2),
+  );
+  if (specLink) {
+    const spec = path.join(root, "openspec", "specs", capability, "spec.md");
+    const source = fs.readFileSync(spec, "utf8");
+    fs.writeFileSync(
+      spec,
+      `${source.replace("**Primary surface:** none", "**Primary surface:** human").trimEnd()}
+
+## Visuals
+
+- [HTML](../../../${base}/html/${capability}-${screen}.html)
+- [PNG](../../../${base}/exports/${capability}-${screen}.png)
+`,
+    );
+  }
+  return { capability, screen, html: `html/${capability}-${screen}.html`, png: `exports/${capability}-${screen}.png` };
 }

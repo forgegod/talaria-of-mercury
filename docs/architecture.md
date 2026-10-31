@@ -9,8 +9,10 @@ the `talaria` console script calls `talaria.cli:main`.
 
 `pyproject.toml` declares Python >=3.10, setuptools packaging, PyYAML for YAML,
 and psutil for process/socket discovery. `uv.lock` pins development resolution.
-Node 24 runs the development-only record validator and its fixture tests; there
-is no Node application dependency, package manager, or build step for Talaria.
+Node 24 runs the development-only structural validator and its fixture tests;
+OpenSpec 1.15.0 owns native artifact validation and lifecycle commands. Neither
+is a Talaria runtime dependency. CI installs the CLI into a job-local npm prefix;
+there is no Node application manifest or build step for Talaria.
 
 ## Structure and flow
 
@@ -22,9 +24,10 @@ is no Node application dependency, package manager, or build step for Talaria.
 | `src/talaria/sync/` | source/target profile resolution, independent artifact sync phases, structured results, atomic backup writer |
 | `tests/` | pytest behaviour evidence with synthetic profiles, SQLite data, logs, and stubbed external calls |
 | `assets/` | brand artwork and checked-in vision benchmark fixtures |
-| `docs/product/` | current capability contracts and test references |
-| `docs/changes/` | material request progress and completed receipts |
-| `scripts/`, `tests/records/` | record validator and synthetic lifecycle/reference tests |
+| `docs/product/` | capability navigation and optional canonical visuals |
+| `openspec/specs/` | current requirements with implementation/test evidence |
+| `openspec/changes/` | native material-change packages, sole task lists, and verified archives |
+| `scripts/`, `tests/records/` | structural validator and synthetic lifecycle/reference tests |
 
 Typical flow is CLI parser → path resolution → feature `run` → structured report
 → output/exit-code dispatcher. Sync uses `SyncOptions`, `SyncProfile`, and
@@ -64,7 +67,9 @@ writes use SQLite; log rotation uses copy → gzip → truncate. Neither inherit
 a blanket atomic profile rollback guarantee.
 
 Doctor's `--dry-run` is specific to curator suggestions: it does not override
-an explicitly supplied tactical `--apply`. See CAP-002 before combining them.
+an explicitly supplied tactical `--apply`. See the
+[doctor requirements](../openspec/specs/doctor-diagnostics-remediation/spec.md)
+before combining them.
 
 Hermes owns actual skill installation/uninstallation and model execution.
 Talaria invokes its CLI. Network access also includes catalog fetches and skill
@@ -81,11 +86,11 @@ Maintenance commands generally print only with `--verbose`; inspections print
 by default. Per-command exceptions and exit semantics belong to the
 [capability index](product/index.md) and [operator guide](../README.md), not an
 assumed universal flag set. Exit codes generally distinguish clean (`0`), an
-alert/action (`1`), and tool errors (`2`); CAPs describe important exceptions.
+alert/action (`1`), and tool errors (`2`); current specs describe important exceptions.
 
 Talaria has no primary visual screen, pane, or dialog. Its non-interactive CLI
-CAPs declare `Primary surface: none`. Future primary visual interactions must
-activate the canonical wireframe workflow in [product records](product/README.md).
+specs declare `Primary surface: none`. Future primary visual interactions must
+activate the canonical wireframe workflow in [product visuals](product/README.md).
 
 Vision fixture paths currently resolve relative to the checkout unless
 `--vision-fixtures-dir` is supplied. A successful wheel build does not establish
@@ -93,9 +98,13 @@ that checkout assets are installed or that live models/providers work.
 
 ## Maintenance and verification
 
-[Product records](product/README.md) describe present behaviour; [change
-records](changes/README.md) own implementation progress. Review packages remain
-CHG-owned receipts and never replace product contracts or test evidence.
+[Current specifications](product/index.md) describe present requirements;
+[native OpenSpec changes](../openspec/AGENTS.md) own implementation progress in
+`tasks.md`, with one orchestrator writing tasks and Git. Proposal visuals and
+factual evidence remain change-owned; they never replace current requirements
+or executable tests. [OpenSpec workflow](openspec-workflow.md) defines bounded
+invocation authority, independent exact-SHA review, and separately authorized
+integration/verified archive. Local validation alone is not integration.
 [Design decisions](design-decisions.md) records durable cross-cutting choices.
 
 From the repository root:
@@ -104,12 +113,16 @@ From the repository root:
 uv sync --locked --extra dev
 uv run --extra dev pytest
 uv build
-node scripts/check-product-records.mjs
+node scripts/check-openspec.mjs
+OPENSPEC_TELEMETRY=0 openspec validate --all --strict
 node --test tests/records/*.test.mjs
 ```
 
 CI forces `_TESTING_TALARIA_SKIP_MODEL_BENCH=1`. Default model-config checks use
 synthetic fixtures; live calls require explicit opt-in and are not acceptance
-evidence for the offline gate. Structural record checks validate references and
-lifecycle, not test execution, assertion quality, honest surface classification,
-or render freshness. No lint/type-check gate is configured.
+evidence for the offline gate. Structural checks validate references, native
+shape, task ownership and visual inventory, not test execution, assertion quality,
+honest surface classification, render freshness or integration. Verify OpenSpec
+reports exactly `1.15.0`; native workflows/companions are separately installed
+user/profile prerequisites, never vendored or initialized as local host adapters.
+No lint/type-check gate is configured.

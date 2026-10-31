@@ -310,7 +310,8 @@ caches.
 - The operator-facing detector table below describes the detector set.
   `--show-resolution` exposes all twelve `detector_ids`, but its descriptive
   `detector_catalog` currently omits `skill_index_drift`. Do not treat that
-  descriptive block as a complete inventory; see CAP-002 for the boundary.
+  descriptive block as a complete inventory; see
+  `openspec/specs/doctor-diagnostics-remediation/spec.md` for the boundary.
 
 ### Detector catalog
 
